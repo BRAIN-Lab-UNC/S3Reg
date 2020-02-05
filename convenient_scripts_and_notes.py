@@ -336,20 +336,19 @@ def isATriangle(neigh_orders_163842, face):
         return False
     return True
     
-def sphere_interpolation_7(vertex, vertices, faces, tree, neigh_orders_163842):
+def sphere_interpolation_7(vertex, vertices, tree, neigh_orders):
     
     _, top7_near_vertex_index = tree.query(vertex[np.newaxis,:], k=7) 
     candi_faces = []
     for k in itertools.combinations(np.squeeze(top7_near_vertex_index), 3):
         tmp = np.asarray(k)  # get the indices of the potential candidate triangles
-        if isATriangle(neigh_orders_163842, tmp):
-            tmp = np.sort(tmp)  # get the indices of the potential candidate triangles
-            tmp = ((faces - tmp) == 0).all(1) # find the index "True" that is a face
-            candi_faces.append(int(np.squeeze(tmp.nonzero())))
+        if isATriangle(neigh_orders, tmp):
+             candi_faces.append(tmp)
+    candi_faces = np.asarray(candi_faces)     
 
-    orig_vertex_1 = vertices[faces[candi_faces,0]]
-    orig_vertex_2 = vertices[faces[candi_faces,1]]
-    orig_vertex_3 = vertices[faces[candi_faces,2]]
+    orig_vertex_1 = vertices[candi_faces[:,0]]
+    orig_vertex_2 = vertices[candi_faces[:,1]]
+    orig_vertex_3 = vertices[candi_faces[:,2]]
     edge_12 = orig_vertex_2 - orig_vertex_1        # edge vectors from vertex 1 to 2
     edge_13 = orig_vertex_3 - orig_vertex_1        # edge vectors from vertex 1 to 3
     faces_normal = np.cross(edge_12, edge_13)    # normals of all the faces
@@ -375,9 +374,9 @@ def sphere_interpolation_7(vertex, vertices, faces, tree, neigh_orders_163842):
     
     w = np.array([area_BCP[index], area_ACP[index], area_ABP[index]])
     inter_weight = w / w.sum()
-    return faces[candi_faces[index]], inter_weight
+    return candi_faces[index], inter_weight
 
-def sphere_interpolation(vertex, vertices, faces, tree, neigh_orders):
+def sphere_interpolation(vertex, vertices, tree, neigh_orders):
     """
     Compute the three indices and weights for sphere interpolation at given position.
     
@@ -399,7 +398,7 @@ def sphere_interpolation(vertex, vertices, faces, tree, neigh_orders):
         area_ABP = np.linalg.norm(np.cross(orig_vertex_1-vertex_proj, orig_vertex_0-vertex_proj))/2.0
         area_ABC = np.linalg.norm(normal)/2.0
         if abs(area_BCP + area_ACP + area_ABP - area_ABC) > 1e-06:
-            return sphere_interpolation_7(vertex, vertices, faces, tree, neigh_orders)
+            return sphere_interpolation_7(vertex, vertices, tree, neigh_orders)
              
         else:
             inter_weight = np.array([area_BCP, area_ACP, area_ABP])
@@ -407,14 +406,14 @@ def sphere_interpolation(vertex, vertices, faces, tree, neigh_orders):
             return top3_near_vertex_index, inter_weight
        
     else:
-        return sphere_interpolation_7(vertex, vertices, faces, tree, neigh_orders)
+        return sphere_interpolation_7(vertex, vertices, tree, neigh_orders)
 
 i = 1
 shape = [65,65]
 pixel_length = 1.2  #np.sqrt(4*np.pi*10000/len(vertices))
 
-sphere_163842 = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.163842.vtk') 
-En_163842 = get_orthonormal_vectors(163842)
+sphere_163842 = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.163842_rotated_0.vtk') 
+En_163842 = get_orthonormal_vectors(163842,0)
 vertices = sphere_163842['vertices'].astype(np.float64)
 tree = KDTree(vertices, leaf_size=10)  # build kdtree
 faces = sphere_163842['faces']
@@ -429,10 +428,11 @@ assert shape[0]%2 == 1 and shape[1]%2 == 1, "Shape[0] and shape[1] should be odd
 
 inter_indices = np.zeros((shape[0]*shape[1],3)).astype(np.int64)
 inter_weights = np.zeros((shape[0]*shape[1],3))
+
 for p in range(shape[0]):
-    print(p)
+#    print(p)
     for q in range(shape[1]):
-        print(q)
+#        print(q)
         if p == int(shape[0]/2) and q == int(shape[0]/2):
              inter_indices[p*shape[0]+q,:], inter_weights[p*shape[0]+q,:] = np.array([i,i,i]), np.array([1,0,0])
         else:
@@ -447,7 +447,7 @@ for p in range(shape[0]):
             sphere_loc = rot_mat.dot(vertices[i])
             assert abs(np.linalg.norm(sphere_loc) - 100) < 0.01
             
-            inter_indices[p*shape[0]+q,:], inter_weights[p*shape[0]+q,:] = sphere_interpolation(sphere_loc, vertices, faces, tree, neigh_orders_163842)
+            inter_indices[p*shape[0]+q,:], inter_weights[p*shape[0]+q,:] = sphere_interpolation(sphere_loc, vertices, tree, neigh_orders_163842)
     
 patch = np.sum(np.multiply((sulc[inter_indices.flatten()]).reshape((inter_indices.shape[0], inter_indices.shape[1])), inter_weights), axis=1)
 patch = patch.reshape((shape[0],shape[1]))

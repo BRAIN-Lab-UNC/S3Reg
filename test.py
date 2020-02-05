@@ -11,8 +11,8 @@ import torch
 import torchvision
 import numpy as np
 import glob
-import itertools
 
+from utils_torch import sphere_interpolation
 from utils import Get_neighs_order, get_orthonormal_vectors, get_z_weight
 from utils_vtk import read_vtk, write_vtk
 
@@ -29,7 +29,7 @@ data_for_test = 0.3
 fix_vertex_dis = 0.3
 model_name = 'regis_sulc_2562_3d_smooth1_phiconsis_3model'
 
-n_vertex = 2562
+n_vertex = 10242
 
 ###########################################################
 """ split files, only need 18 month now"""
@@ -74,10 +74,33 @@ assert len(neigh_orders) == n_vertex * 7, "neigh_orders wrong!"
 
 z_weight_0 = get_z_weight(n_vertex, 0)
 z_weight_0 = torch.from_numpy(z_weight_0.astype(np.float32)).cuda(device)
+index_0_0 = (z_weight_0 == 1).nonzero()
+index_0_1 = (z_weight_0 < 1).nonzero()
+assert len(index_0_0) + len(index_0_1) == n_vertex, "error!"
 z_weight_1 = get_z_weight(n_vertex, 1)
 z_weight_1 = torch.from_numpy(z_weight_1.astype(np.float32)).cuda(device)
+index_1_0 = (z_weight_1 == 1).nonzero()
+index_1_1 = (z_weight_1 < 1).nonzero()
+assert len(index_1_0) + len(index_1_1) == n_vertex, "error!"
 z_weight_2 = get_z_weight(n_vertex, 2)
 z_weight_2 = torch.from_numpy(z_weight_2.astype(np.float32)).cuda(device)
+index_2_0 = (z_weight_2 == 1).nonzero()
+index_2_1 = (z_weight_2 < 1).nonzero()
+assert len(index_2_0) + len(index_2_1) == n_vertex, "error!"
+
+index_01 = np.intersect1d(index_0_0.detach().cpu().numpy(), index_1_0.detach().cpu().numpy())
+index_02 = np.intersect1d(index_0_0.detach().cpu().numpy(), index_2_0.detach().cpu().numpy())
+index_12 = np.intersect1d(index_0_0.detach().cpu().numpy(), index_2_0.detach().cpu().numpy())
+index_01 = torch.from_numpy(index_01).cuda(device)
+index_02 = torch.from_numpy(index_02).cuda(device)
+index_12 = torch.from_numpy(index_12).cuda(device)
+rot_mat_01 = torch.tensor([[np.cos(np.pi/2), 0, np.sin(np.pi/2)],
+                           [0., 1., 0.],
+                           [-np.sin(np.pi/2), 0, np.cos(np.pi/2)]]).cuda(device)
+rot_mat_12 = torch.tensor([[1., 0., 0.],
+                           [0, np.cos(np.pi/2), -np.sin(np.pi/2)],
+                           [0, np.sin(np.pi/2), np.cos(np.pi/2)]]).cuda(device)
+rot_mat_02 = torch.mm(rot_mat_12, rot_mat_01)
 
 En_0 = get_orthonormal_vectors(n_vertex, rotated=0)
 En_0 = torch.from_numpy(En_0.astype(np.float32)).cuda(device)
@@ -121,91 +144,6 @@ model_2.cuda(device)
 model_2.load_state_dict(torch.load('/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/' + model_name + '_2.mdl'))
 
 
-def sphere_interpolation_7(moving_warp_phi_3d_i, distance, fixed_xyz):
-    """
-    Compute the three indices and weights for sphere interpolation at given position.
-    
-    moving_warp_phi_3d_i: torch.tensor, size: [3]
-    distance: the distance from each fiexd vertices to the interpolation position
-    """
-    _, top7_near_vertex_index = torch.topk(distance, 7, largest = False, sorted = False)
-    candi_faces = []
-    for k in itertools.combinations(top7_near_vertex_index.detach().cpu().numpy(), 3):
-        tmp1, _ = torch.sort(torch.tensor(k).cuda(device))  # get the indices of the potential candidate triangles
-        tmp2 = ((fixed_faces - tmp1) == 0).all(1) # find the index "True" that is a face
-        if tmp2.sum() == 1:
-            candi_faces.append(tmp2.nonzero().squeeze().item())
-            
-    orig_vertex_1 = fixed_xyz[fixed_faces[candi_faces,0]]
-    orig_vertex_2 = fixed_xyz[fixed_faces[candi_faces,1]]
-    orig_vertex_3 = fixed_xyz[fixed_faces[candi_faces,2]]
-    edge_12 = orig_vertex_2 - orig_vertex_1        # edge vectors from vertex 1 to 2
-    edge_13 = orig_vertex_3 - orig_vertex_1        # edge vectors from vertex 1 to 3
-    faces_normal = torch.cross(edge_12, edge_13, dim=1)    # normals of all the faces
-    
-    # use formula p(x) = <p1,n>/<x,n> * x in spherical demons paper to calculate the intersection with each faces
-    upper = torch.sum(orig_vertex_1 * faces_normal, axis=1)
-    lower = torch.sum(moving_warp_phi_3d_i * faces_normal, axis=1)
-    ratio = upper/lower
-    ratio = ratio.unsqueeze(1)
-    moving_warp_phi_3d_i_proj = ratio * moving_warp_phi_3d_i  # intersection points
-    
-    # find the triangle face that the inersection is in, if the intersection
-    # is in, the area of 3 small triangles is equal to the whole triangle
-    area_BCP = 1/2 * torch.norm(torch.cross(orig_vertex_2 - moving_warp_phi_3d_i_proj, orig_vertex_3 - moving_warp_phi_3d_i_proj), 2, dim=1)
-    area_ACP = 1/2 * torch.norm(torch.cross(orig_vertex_3 - moving_warp_phi_3d_i_proj, orig_vertex_1 - moving_warp_phi_3d_i_proj), 2, dim=1)
-    area_ABP = 1/2 * torch.norm(torch.cross(orig_vertex_1 - moving_warp_phi_3d_i_proj, orig_vertex_2 - moving_warp_phi_3d_i_proj), 2, dim=1)
-    area_ABC = 1/2 * torch.norm(faces_normal, 2, dim=1)
-    
-    min_area, index = torch.min(abs(area_BCP + area_ACP + area_ABP - area_ABC),0)
-    assert abs(ratio[index] - 1) < 0.01, "projected vertex should be near the vertex!" 
-    assert min_area < 5e-05, "Intersection should be in the triangle"
-    w = torch.stack((area_BCP[index], area_ACP[index], area_ABP[index]))
-    inter_weight = w / w.sum()
-    
-    return fixed_faces[candi_faces[index]], inter_weight
-            
-def sphere_interpolation(moving_warp_phi_3d, fixed_xyz, fixed_sulc):
-    fixed_inter = torch.zeros((len(moving_warp_phi_3d),1), dtype=torch.float32, device = device)
-    for i in range(len(moving_warp_phi_3d)):
-        moving_warp_phi_3d_i = moving_warp_phi_3d[i]
-        
-        """ barycentric interpolation """
-        distance = torch.norm((fixed_xyz - moving_warp_phi_3d_i), 2, dim=1)
-        _, top3_near_vertex_index = torch.topk(distance, 3, largest = False, sorted = False)
-        top3_near_vertex_index, _ = torch.sort(top3_near_vertex_index)     
-        
-        if ((fixed_faces - top3_near_vertex_index) == 0).all(1).sum() == 1:
-            # if the 3 nearest indices compose a triangle:
-            top3_near_vertex_0 = fixed_xyz[top3_near_vertex_index[0]]
-            top3_near_vertex_1 = fixed_xyz[top3_near_vertex_index[1]]
-            top3_near_vertex_2 = fixed_xyz[top3_near_vertex_index[2]]
-            
-            # use formula p(x) = <p1,n>/<x,n> * x in spherical demons paper to calculate the intersection with the triangle face
-            normal = torch.cross(top3_near_vertex_0-top3_near_vertex_2, top3_near_vertex_1-top3_near_vertex_2)
-            ratio = torch.dot(top3_near_vertex_0, normal)/torch.dot(moving_warp_phi_3d_i, normal)
-            moving_warp_phi_3d_i_proj = ratio * moving_warp_phi_3d_i  # intersection points
-            
-            # compute the small triangle area and check if the intersection point is in the triangle
-            area_BCP = 1/2 * torch.norm(torch.cross(top3_near_vertex_1 - moving_warp_phi_3d_i_proj, top3_near_vertex_2 - moving_warp_phi_3d_i_proj), 2)
-            area_ACP = 1/2 * torch.norm(torch.cross(top3_near_vertex_2 - moving_warp_phi_3d_i_proj, top3_near_vertex_0 - moving_warp_phi_3d_i_proj), 2)
-            area_ABP = 1/2 * torch.norm(torch.cross(top3_near_vertex_0 - moving_warp_phi_3d_i_proj, top3_near_vertex_1 - moving_warp_phi_3d_i_proj), 2)
-            area_ABC = 1/2 * torch.norm(normal, 2)
-            
-            if abs(area_BCP + area_ACP + area_ABP - area_ABC) > 5e-05:
-                inter_indices, inter_weight = sphere_interpolation_7(moving_warp_phi_3d_i, distance, fixed_xyz) 
-            else:
-                inter_weight = torch.stack((area_BCP, area_ACP, area_ABP))
-                inter_weight = inter_weight / inter_weight.sum()
-                inter_indices = top3_near_vertex_index
-        else:
-            inter_indices, inter_weight = sphere_interpolation_7(moving_warp_phi_3d_i, distance, fixed_xyz)
-            
-        fixed_inter[i] = torch.mm(inter_weight.unsqueeze(0), fixed_sulc[inter_indices])
-    
-    return fixed_inter
-            
-
 #    dataiter = iter(train_dataloader)
 #    moving, file = dataiter.next()
 
@@ -221,8 +159,10 @@ def test(dataloader):
     smooth_1 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
     mae_2 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
     smooth_2 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
-    
-   
+    phi_consis_01 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
+    phi_consis_12 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
+    phi_consis_02 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
+
     with torch.no_grad():
         for batch_idx, (moving, file) in enumerate(dataloader):
         
@@ -244,6 +184,14 @@ def test(dataloader):
             phi_3d_2 = torch.zeros(3, len(En_2)).cuda(device)
             for j in range(len(En_2)):
                 phi_3d_2[:,j] = torch.squeeze(torch.mm(En_2[j,:,:], torch.unsqueeze(phi_2d_2[j,:],1)))
+                
+            """ deformation consistency  """
+            phi_3d_0_to_1 = torch.mm(rot_mat_01, phi_3d_0)
+            phi_3d_0_to_1 = torch.transpose(phi_3d_0_to_1, 0, 1)
+            phi_3d_1_to_2 = torch.mm(rot_mat_12, phi_3d_1)
+            phi_3d_1_to_2 = torch.transpose(phi_3d_1_to_2, 0, 1)
+            phi_3d_0_to_2 = torch.mm(rot_mat_02, phi_3d_0)
+            phi_3d_0_to_2 = torch.transpose(phi_3d_0_to_2, 0, 1)
             
             phi_3d_0 = torch.transpose(phi_3d_0, 0, 1)
             moving_warp_phi_3d_0 = fixed_xyz_0 + phi_3d_0
@@ -256,10 +204,9 @@ def test(dataloader):
             moving_warp_phi_3d_2 = moving_warp_phi_3d_2/(torch.norm(moving_warp_phi_3d_2, dim=1, keepdim=True).repeat(1,3)) # normalize the deformed vertices onto the sphere
             
             """ compute interpolation values on fixed surface """
-            fixed_inter_0 = sphere_interpolation(moving_warp_phi_3d_0, fixed_xyz_0, fixed_sulc)
-            fixed_inter_1 = sphere_interpolation(moving_warp_phi_3d_1, fixed_xyz_1, fixed_sulc)
-            fixed_inter_2 = sphere_interpolation(moving_warp_phi_3d_2, fixed_xyz_2, fixed_sulc)
-                    
+            fixed_inter_0 = sphere_interpolation(moving_warp_phi_3d_0, fixed_xyz_0, fixed_sulc, neigh_orders, device)
+            fixed_inter_1 = sphere_interpolation(moving_warp_phi_3d_1, fixed_xyz_1, fixed_sulc, neigh_orders, device)
+            fixed_inter_2 = sphere_interpolation(moving_warp_phi_3d_2, fixed_xyz_2, fixed_sulc, neigh_orders, device)
             
             mae_0[batch_idx] = torch.mean(torch.abs(fixed_inter_0 - moving) * z_weight_0.unsqueeze(1))
             mae_1[batch_idx] = torch.mean(torch.abs(fixed_inter_1 - moving) * z_weight_1.unsqueeze(1))
@@ -268,12 +215,16 @@ def test(dataloader):
             smooth_0[batch_idx] = torch.mean(torch.abs(torch.mm(phi_3d_0[:,[0]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_0.unsqueeze(1)) + \
                                              torch.abs(torch.mm(phi_3d_0[:,[1]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_0.unsqueeze(1)) + \
                                              torch.abs(torch.mm(phi_3d_0[:,[2]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_0.unsqueeze(1)))
-            smooth_1[batch_idx] = torch.mean(torch.abs(torch.mm(phi_3d_1[:,[0]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_0.unsqueeze(1)) + \
-                                             torch.abs(torch.mm(phi_3d_1[:,[1]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_0.unsqueeze(1)) + \
-                                             torch.abs(torch.mm(phi_3d_1[:,[2]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_0.unsqueeze(1)))
-            smooth_2[batch_idx] = torch.mean(torch.abs(torch.mm(phi_3d_2[:,[0]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_0.unsqueeze(1)) + \
-                                             torch.abs(torch.mm(phi_3d_2[:,[1]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_0.unsqueeze(1)) + \
-                                             torch.abs(torch.mm(phi_3d_2[:,[2]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_0.unsqueeze(1)))
+            smooth_1[batch_idx] = torch.mean(torch.abs(torch.mm(phi_3d_1[:,[0]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_1.unsqueeze(1)) + \
+                                             torch.abs(torch.mm(phi_3d_1[:,[1]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_1.unsqueeze(1)) + \
+                                             torch.abs(torch.mm(phi_3d_1[:,[2]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_1.unsqueeze(1)))
+            smooth_2[batch_idx] = torch.mean(torch.abs(torch.mm(phi_3d_2[:,[0]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_2.unsqueeze(1)) + \
+                                             torch.abs(torch.mm(phi_3d_2[:,[1]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_2.unsqueeze(1)) + \
+                                             torch.abs(torch.mm(phi_3d_2[:,[2]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_2.unsqueeze(1)))
+            
+            phi_consis_01[batch_idx] = torch.mean(torch.abs(phi_3d_0_to_1[index_01] - phi_3d_1[index_01]))
+            phi_consis_12[batch_idx] = torch.mean(torch.abs(phi_3d_1_to_2[index_12] - phi_3d_2[index_12]))
+            phi_consis_02[batch_idx] = torch.mean(torch.abs(phi_3d_0_to_2[index_02] - phi_3d_2[index_02]))
             
             moved = {'vertices': moving_warp_phi_3d_0.detach().cpu().numpy()*100.0,
                     'faces': fixed_0['faces'],
@@ -305,11 +256,11 @@ def test(dataloader):
                      'sulc': moving.detach().cpu().numpy() * (13.65+11.5) - 11.5}
             write_vtk(origin, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name + '/' + file[0].split('/')[10][:-3] + 'DL.origin_2.vtk')
         
-    return mae_0, smooth_0, mae_1, smooth_1, mae_2, smooth_2
+    return mae_0, smooth_0, mae_1, smooth_1, mae_2, smooth_2, phi_consis_01, phi_consis_12, phi_consis_02
 
 
-train_mae_0, train_smooth_0, train_mae_1, train_smooth_1, train_mae_2, train_smooth_2 = test(train_dataloader) 
-val_mae_0, val_smooth_0, val_mae_1, val_smooth_1, val_mae_2, val_smooth_2 = test(val_dataloader) 
+train_mae_0, train_smooth_0, train_mae_1, train_smooth_1, train_mae_2, train_smooth_2, train_phi_consis_01, train_phi_consis_12, train_phi_consis_02 = test(train_dataloader) 
+val_mae_0, val_smooth_0, val_mae_1, val_smooth_1, val_mae_2, val_smooth_2, test_phi_consis_01, test_phi_consis_12, test_phi_consis_02 = test(val_dataloader) 
 
 print("train_mae_0: mean: {:.4}, std: {:.4}".format(train_mae_0.mean().item(), train_mae_0.std().item()))
 print("train_mae_1: mean: {:.4}, std: {:.4}".format(train_mae_1.mean().item(), train_mae_1.std().item()))
@@ -326,3 +277,11 @@ print("train_smooth_2: mean: {:.4}, std: {:.4}".format(train_smooth_2.mean().ite
 print("val_smooth_0: mean: {:.4}, std: {:.4}".format(val_smooth_0.mean().item(), val_smooth_0.std().item()))
 print("val_smooth_1: mean: {:.4}, std: {:.4}".format(val_smooth_1.mean().item(), val_smooth_1.std().item()))
 print("val_smooth_2: mean: {:.4}, std: {:.4}".format(val_smooth_2.mean().item(), val_smooth_2.std().item()))
+
+print("train_phi_consis_01: mean: {:.4}, std: {:.4}".format(train_phi_consis_01.mean().item(), train_phi_consis_01.std().item()))
+print("train_phi_consis_12: mean: {:.4}, std: {:.4}".format(train_phi_consis_12.mean().item(), train_phi_consis_12.std().item()))
+print("train_phi_consis_02: mean: {:.4}, std: {:.4}".format(train_phi_consis_02.mean().item(), train_phi_consis_02.std().item()))
+
+print("test_phi_consis_01: mean: {:.4}, std: {:.4}".format(test_phi_consis_01.mean().item(), test_phi_consis_01.std().item()))
+print("test_phi_consis_12: mean: {:.4}, std: {:.4}".format(test_phi_consis_12.mean().item(), test_phi_consis_12.std().item()))
+print("test_phi_consis_02: mean: {:.4}, std: {:.4}".format(test_phi_consis_02.mean().item(), test_phi_consis_02.std().item()))
