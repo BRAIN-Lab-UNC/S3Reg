@@ -27,7 +27,7 @@ device = torch.device('cuda:1')
 batch_size = 1
 data_for_test = 0.3
 fix_vertex_dis = 0.3
-model_name = 'regis_sulc_2562_3d_smooth1_phiconsis_3model'
+model_name = 'regis_sulc_10242_3d_smooth1_phiconsis_3model'
 
 n_vertex = 10242
 
@@ -90,7 +90,7 @@ assert len(index_2_0) + len(index_2_1) == n_vertex, "error!"
 
 index_01 = np.intersect1d(index_0_0.detach().cpu().numpy(), index_1_0.detach().cpu().numpy())
 index_02 = np.intersect1d(index_0_0.detach().cpu().numpy(), index_2_0.detach().cpu().numpy())
-index_12 = np.intersect1d(index_0_0.detach().cpu().numpy(), index_2_0.detach().cpu().numpy())
+index_12 = np.intersect1d(index_1_0.detach().cpu().numpy(), index_2_0.detach().cpu().numpy())
 index_01 = torch.from_numpy(index_01).cuda(device)
 index_02 = torch.from_numpy(index_02).cuda(device)
 index_12 = torch.from_numpy(index_12).cuda(device)
@@ -101,6 +101,28 @@ rot_mat_12 = torch.tensor([[1., 0., 0.],
                            [0, np.cos(np.pi/2), -np.sin(np.pi/2)],
                            [0, np.sin(np.pi/2), np.cos(np.pi/2)]]).cuda(device)
 rot_mat_02 = torch.mm(rot_mat_12, rot_mat_01)
+rot_mat_20 = torch.inverse(rot_mat_02)
+
+tmp = torch.cat((index_0_0, index_1_0, index_2_0))
+tmp, indices = torch.sort(tmp.squeeze())
+output, counts = torch.unique_consecutive(tmp, return_counts=True)
+assert len(output) == n_vertex, "len(output) = n_vertex, error"
+assert output[0] == 0, "output[0] = 0, error"
+assert output[-1] == n_vertex-1, "output[-1] = n_vertex-1, error"
+assert counts.max() == 3, "counts.max() == 3, error"
+assert counts.min() == 2, "counts.min() == 3, error"
+index_triple_computed = (counts == 3).nonzero().squeeze()
+index_double_computed = (counts == 2).nonzero().squeeze()
+tmp = np.intersect1d(index_02.cpu().numpy(), index_triple_computed.cpu().numpy())
+assert (tmp == index_triple_computed.cpu().numpy()).all(), "(tmp == index_triple_computed.cpu().numpy()).all(), error"
+index_double_02 = torch.from_numpy(np.setdiff1d(index_02.cpu().numpy(), index_triple_computed.cpu().numpy())).cuda(device)
+tmp = np.intersect1d(index_12.cpu().numpy(), index_triple_computed.cpu().numpy())
+assert (tmp == index_triple_computed.cpu().numpy()).all(), "(tmp == index_triple_computed.cpu().numpy()).all(), error"
+index_double_12 = torch.from_numpy(np.setdiff1d(index_12.cpu().numpy(), index_triple_computed.cpu().numpy())).cuda(device)
+tmp = np.intersect1d(index_01.cpu().numpy(), index_triple_computed.cpu().numpy())
+assert (tmp == index_triple_computed.cpu().numpy()).all(), "(tmp == index_triple_computed.cpu().numpy()).all(), error"
+index_double_01 = torch.from_numpy(np.setdiff1d(index_01.cpu().numpy(), index_triple_computed.cpu().numpy())).cuda(device)
+assert len(index_double_01) + len(index_double_12) + len(index_double_02) + len(index_triple_computed) == n_vertex, "double computed and three computed error"
 
 En_0 = get_orthonormal_vectors(n_vertex, rotated=0)
 En_0 = torch.from_numpy(En_0.astype(np.float32)).cuda(device)
@@ -255,6 +277,29 @@ def test(dataloader):
                      'deformation': phi_3d_2.detach().cpu().numpy() * 100.0,
                      'sulc': moving.detach().cpu().numpy() * (13.65+11.5) - 11.5}
             write_vtk(origin, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name + '/' + file[0].split('/')[10][:-3] + 'DL.origin_2.vtk')
+            
+            # Combine all phi_3d together
+            phi_3d = torch.zeros(len(En_0), 3).cuda(device)
+            phi_3d[index_double_02] = (phi_3d_0_to_2[index_double_02] + phi_3d_2[index_double_02])/2.0
+            phi_3d[index_double_12] = (phi_3d_1_to_2[index_double_12] + phi_3d_2[index_double_12])/2.0
+            tmp = (phi_3d_0_to_1[index_double_01] + phi_3d_1[index_double_01])/2.0
+            phi_3d[index_double_01] = torch.transpose(torch.mm(rot_mat_12, torch.transpose(tmp,0,1)), 0, 1)
+            phi_3d[index_triple_computed] = (phi_3d_1_to_2[index_triple_computed] + phi_3d_2[index_triple_computed] + phi_3d_0_to_2[index_triple_computed])/3.0
+            phi_3d = torch.transpose(torch.mm(rot_mat_20, torch.transpose(phi_3d,0,1)),0,1)
+            
+            moving_warp_phi_3d = fixed_xyz_0 + phi_3d
+            moving_warp_phi_3d = moving_warp_phi_3d/(torch.norm(moving_warp_phi_3d, dim=1, keepdim=True).repeat(1,3)) # normalize the deformed vertices onto the sphere
+            
+            moved = {'vertices': moving_warp_phi_3d.detach().cpu().numpy()*100.0,
+                    'faces': fixed_0['faces'],
+                    'sulc': moving.detach().cpu().numpy() * (13.65+11.5) - 11.5}
+            write_vtk(moved, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name +'/' + file[0].split('/')[10][:-3] + 'DL.moved_3.vtk')
+            origin = {'vertices': fixed_0['vertices'],
+                     'faces': fixed_0['faces'],
+                     'deformation': phi_3d.detach().cpu().numpy() * 100.0,
+                     'sulc': moving.detach().cpu().numpy() * (13.65+11.5) - 11.5}
+            write_vtk(origin, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name + '/' + file[0].split('/')[10][:-3] + 'DL.origin_3.vtk')
+            
         
     return mae_0, smooth_0, mae_1, smooth_1, mae_2, smooth_2, phi_consis_01, phi_consis_12, phi_consis_02
 
