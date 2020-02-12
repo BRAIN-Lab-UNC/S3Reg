@@ -30,13 +30,13 @@ learning_rate = 0.05
 batch_size = 1
 data_for_test = 0.3
 #weight_corr = 0.3
-weight_smooth = 1.0
-weight_l2 = 4.0
+weight_smooth = 0.3
+weight_l2 = 5.0
 weight_l1 = 1.0
-weight_phi_consis = 0.7
+weight_phi_consis = 0.6
 fix_vertex_dis = 0.3
 
-n_vertex = 10242
+n_vertex = 642
 
 ###########################################################
 """ split files, only need 18 month now"""
@@ -49,7 +49,7 @@ train_files = [ files[x] for x in range(int(len(files)*data_for_test), len(files
 ###########################################################
 """ load fixed/atlas surface, smooth filter, global parameter pre-defined """
 
-fixed = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+str(n_vertex)+'_rotated_0.vtk')
+fixed = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+str(n_vertex)+'.rotated_0.vtk')
 fixed_faces = fixed['faces']
 fixed_faces = torch.from_numpy(fixed_faces[:,[1,2,3]]).cuda(device)
 fixed_faces = torch.sort(fixed_faces, axis=1)[0]
@@ -59,10 +59,10 @@ fixed_sulc = torch.from_numpy(fixed_sulc.astype(np.float32)).cuda(device)
 
 fixed_xyz_0 = fixed['vertices']/100.0  # fixed spherical coordinate
 fixed_xyz_0 = torch.from_numpy(fixed_xyz_0.astype(np.float32)).cuda(device)
-fixed = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+str(n_vertex)+'_rotated_1.vtk')
+fixed = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+str(n_vertex)+'.rotated_1.vtk')
 fixed_xyz_1 = fixed['vertices']/100.0  # fixed spherical coordinate
 fixed_xyz_1 = torch.from_numpy(fixed_xyz_1.astype(np.float32)).cuda(device)
-fixed = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+str(n_vertex)+'_rotated_2.vtk')
+fixed = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+str(n_vertex)+'.rotated_2.vtk')
 fixed_xyz_2 = fixed['vertices']/100.0  # fixed spherical coordinate
 fixed_xyz_2 = torch.from_numpy(fixed_xyz_2.astype(np.float32)).cuda(device)
 
@@ -148,7 +148,6 @@ model_2 = Unet(in_ch=in_ch, out_ch=out_ch, level=level, n_res=n_res, rotated=2)
 model_2.cuda(device)
 optimizer_2 = torch.optim.Adam(model_2.parameters(), lr=learning_rate,  betas=(0.9, 0.999))
 
-
 optimizers = [optimizer_0, optimizer_1, optimizer_2]
 
 def get_learning_rate(epoch):
@@ -159,7 +158,6 @@ def get_learning_rate(epoch):
         if epoch < lim:
             return lr * learning_rate
     return lrs[-1] * learning_rate
-
 
 
 for epoch in range(50):
@@ -257,8 +255,8 @@ for epoch in range(50):
         writer.add_scalars('Train/loss', {'loss_l1': loss_l1.item(), 'loss_l2': loss_l2.item(), 'loss_smooth': loss_smooth.item(), 'loss_phi_consistency': loss_phi_consistency.item()}, 
                                           epoch*len(train_dataloader) + batch_idx)
     
-    torch.save(model_0.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/regis_sulc_"+str(n_vertex)+"_3d_smooth1_phiconsis_3model_0.mdl")
-    torch.save(model_1.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/regis_sulc_"+str(n_vertex)+"_3d_smooth1_phiconsis_3model_1.mdl")
-    torch.save(model_2.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/regis_sulc_"+str(n_vertex)+"_3d_smooth1_phiconsis_3model_2.mdl")
+    torch.save(model_0.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/regis_sulc_"+str(n_vertex)+"_3d_smooth0p3_phiconsis0p6_3model_0.mdl")
+    torch.save(model_1.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/regis_sulc_"+str(n_vertex)+"_3d_smooth0p3_phiconsis0p6_3model_1.mdl")
+    torch.save(model_2.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/regis_sulc_"+str(n_vertex)+"_3d_smooth0p3_phiconsis0p6_3model_2.mdl")
     
     

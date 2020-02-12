@@ -199,38 +199,41 @@ def check_intersect_vertices(vertices, faces):
     vertices: N * 3, numpy array, float 64
     faces: (N*2-4) * 3, numpy array, float 64
     """
-    template = read_vtk('/media/fenqiang/DATA/unc/Data/registration/presentation/regis_sulc_2562_3d_smooth1_3model/MNBCP124529_588.lh.SphereSurf.Orig.sphere.resampled.2562.DL.moved_2.vtk')
-    vertices = template['vertices']
-    faces = template['faces'][:,1:]
+#    template = read_vtk('/media/fenqiang/DATA/unc/Data/registration/presentation/regis_sulc_2562_3d_smooth1_3model/MNBCP124529_588.lh.SphereSurf.Orig.sphere.resampled.2562.DL.moved_2.vtk')
+#    vertices = template['vertices']
+#    faces = template['faces'][:,1:]
     
     assert vertices.shape[1] == 3, "vertices size not right"
     assert faces.shape[1] == 3, "faces size not right"
     assert 2*len(vertices)-4 == len(faces), "vertices are not consistent with faces."
     
+    vertices = vertices.astype(np.float64)
     top_k = int(len(vertices)/3.0)
     
     intersect = []
     for i in range(len(faces)):
         face = faces[i,:]
         face_vert = vertices[face,:]
-        dis_0 = np.linalg.norm(vertices - face_vert[0], axis=1)
+        orig_vertex_1 = face_vert[0]
+        orig_vertex_2 = face_vert[1]
+        orig_vertex_3 = face_vert[2]
+        
+        dis_0 = np.linalg.norm(vertices - orig_vertex_1, axis=1)
         ind_0 = np.argpartition(dis_0, top_k)[0:top_k]
-        dis_1 = np.linalg.norm(vertices - face_vert[1], axis=1)
+        dis_1 = np.linalg.norm(vertices - orig_vertex_2, axis=1)
         ind_1 = np.argpartition(dis_1, top_k)[0:top_k]
-        dis_2 = np.linalg.norm(vertices - face_vert[2], axis=1)
+        dis_2 = np.linalg.norm(vertices - orig_vertex_3, axis=1)
         ind_2 = np.argpartition(dis_2, top_k)[0:top_k]
         ind = np.intersect1d(ind_0, ind_1)
         ind = np.intersect1d(ind, ind_2)
         
-        assert len(ind) > len(vertices)/6.0
-        
-        orig_vertex_1 = vertices[face[0]]
-        orig_vertex_2 = vertices[face[1]]
-        orig_vertex_3 = vertices[face[2]]
-        normal = np.cross(orig_vertex_1-orig_vertex_3, orig_vertex_2-orig_vertex_3)    # normals of all the faces
-        
-        upper = np.sum(vertices[ind,:] * normal, axis=1)
-        lower = np.sum(orig_vertex_1 * normal)
+        assert len(ind) > len(vertices)/6.0, "extremly ugly face" + str(i) + "-th face!"
+       
+        normal = np.cross(orig_vertex_1-orig_vertex_3, orig_vertex_2-orig_vertex_3)    # normals of the face
+          
+        # use formula p(x) = <p1,n>/<x,n> * x in spherical demons paper to calculate the intersection with the triangle face
+        upper = np.sum(orig_vertex_1 * normal)
+        lower = np.sum(vertices[ind,:] * normal, axis=1)
         ratio = upper/lower
         P = np.repeat(ratio[:,np.newaxis], 3, axis=1) * vertices[ind,:]  # intersection points
         
@@ -239,14 +242,21 @@ def check_intersect_vertices(vertices, faces):
         area_ABP = np.linalg.norm(np.cross(orig_vertex_2-P, orig_vertex_1-P), axis=1)/2.0
         area_ABC = np.linalg.norm(normal)/2.0
         
-        inter_ind = (np.abs(area_BCP + area_ACP + area_ABP - area_ABC) < 1e-10).nonzero()[0]
+        tmp = area_BCP + area_ACP + area_ABP - area_ABC
         
-        # TODO
-        assert face in inter_ind
-        inter_ind.remove(face)
+        candi = []
+        candi.append((tmp <= 1e-4).nonzero()[0])
         
-        for k in range(len(inter_ind)):
-            intersect.append([i, inter_ind[k]])
+        candi = ind[candi]
+        for t in face:
+            assert t in candi, "t in candi, error"
+        pending_del = []
+        for t in face:
+            pending_del.append(np.argwhere(candi==t)[0])
+        candi = np.delete(candi, pending_del, 0)
         
+        for k in range(len(candi)):
+             intersect.append([i, candi[k]])
+       
     intersect = np.asarray(intersect)
-    
+    return intersect.size == 0

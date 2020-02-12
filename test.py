@@ -27,9 +27,9 @@ device = torch.device('cuda:1')
 batch_size = 1
 data_for_test = 0.3
 fix_vertex_dis = 0.3
-model_name = 'regis_sulc_10242_3d_smooth1_phiconsis_3model'
+model_name = 'regis_sulc_642_3d_smooth0p3_phiconsis0p5_3model'
 
-n_vertex = 10242
+n_vertex = 642
 
 ###########################################################
 """ split files, only need 18 month now"""

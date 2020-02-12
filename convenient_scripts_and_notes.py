@@ -8,13 +8,13 @@ Created on Fri Jan  3 11:13:58 2020
 
 import numpy as np
 import glob
-import itertools
 import os
 from utils_vtk import read_vtk, remove_field, write_vtk
 from utils import get_orthonormal_vectors, Get_neighs_order
 import matplotlib.pyplot as plt
 from sklearn.neighbors import KDTree
 import scipy.io as sio 
+from utils_interpolation import sphere_interpolation
 
 #####################################################################
 """ compute the number of subjects of each month """
@@ -167,6 +167,8 @@ template_162 = read_vtk('/media/fenqiang/DATA/unc/Data/Template/sphere_162.vtk')
 template_42 = read_vtk('/media/fenqiang/DATA/unc/Data/Template/sphere_42.vtk')
 
 files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/data/preprocessed_npy/*/*.lh.SphereSurf.AlignedToAtlas.sphere.resampled.163842.npy'))
+files = [x for x in files if float(x.split('/')[-1].split('_')[1].split('.')[0]) >=450 and float(x.split('/')[-1].split('_')[1].split('.')[0]) <= 630]
+
 data = np.zeros((len(files), 163842, 2))
 for i in range(len(files)):
     data[i,:,:] = np.load(files[i])
@@ -176,45 +178,45 @@ data = {'vertices': template_160k['vertices'],
         'faces': template_160k['faces'],
         'curv': np.squeeze(mean_atlas[:,0]),
         'sulc': np.squeeze(mean_atlas[:,1])}
-write_vtk(data, '/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.163842.vtk')
+write_vtk(data, '/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.163842.rotated_0.vtk')
 
-file = '/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.163842.vtk'
+file = '/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.163842.rotated_0.vtk'
 for key, value in data.items():
     if key != 'faces':
         data[key] = data[key][0:40962]
     else:
         data['faces'] = template_40k['faces']
-write_vtk(data, file.replace('.163842.vtk','.40962.vtk'))
+write_vtk(data, file.replace('.163842','.40962'))
 for key, value in data.items():
     if key != 'faces':
         data[key] = data[key][0:10242]
     else:
         data['faces'] = template_10k['faces']
-write_vtk(data, file.replace('.163842.vtk','.10242.vtk'))      
+write_vtk(data, file.replace('.163842','.10242'))      
 for key, value in data.items():
     if key != 'faces':
         data[key] = data[key][0:2562]
     else:
         data['faces'] = template_2562['faces']
-write_vtk(data, file.replace('.163842.vtk','.2562.vtk'))
+write_vtk(data, file.replace('.163842','.2562'))
 for key, value in data.items():
     if key != 'faces':
         data[key] = data[key][0:642]
     else:
         data['faces'] = template_642['faces']
-write_vtk(data, file.replace('.163842.vtk','.642.vtk'))        
+write_vtk(data, file.replace('.163842','.642'))        
 for key, value in data.items():
     if key != 'faces':
         data[key] = data[key][0:162]
     else:
         data['faces'] = template_162['faces']
-write_vtk(data, file.replace('.163842.vtk','.162.vtk'))
+write_vtk(data, file.replace('.163842','.162'))
 for key, value in data.items():
     if key != 'faces':
         data[key] = data[key][0:42]
     else:
         data['faces'] = template_42['faces']
-write_vtk(data, file.replace('.163842.vtk','.42.vtk'))
+write_vtk(data, file.replace('.163842','.42'))
 
 """ save npy atlas """
 data = read_vtk(file)
@@ -229,6 +231,27 @@ np.save(file.replace('vtk','npy').replace('163842','642'), data[0:642])
 np.save(file.replace('vtk','npy').replace('163842','162'), data[0:162])
 np.save(file.replace('vtk','npy').replace('163842','42'), data[0:42])
 
+
+#####################################################################
+""" rotate atlas """ 
+
+ns_vertex = [42, 162, 642, 2562, 10242, 40962, 163842]
+for n_vertex in ns_vertex:
+    atlas = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+str(n_vertex)+'.rotated_0.vtk')    
+    vertices = atlas['vertices']
+    rotate_mat = np.array([[np.cos(np.pi/2), 0, np.sin(np.pi/2)],
+                           [0, 1, 0],
+                           [-np.sin(np.pi/2), 0, np.cos(np.pi/2)]])
+    rotated_ver = np.transpose(np.dot(rotate_mat, np.transpose(vertices)))
+    atlas['vertices'] = rotated_ver
+    write_vtk(atlas, '/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+str(n_vertex)+'.rotated_1.vtk')
+
+    rotate_mat = np.array([[1, 0, 0],
+                           [0, np.cos(np.pi/2), -np.sin(np.pi/2)],
+                           [0, np.sin(np.pi/2), np.cos(np.pi/2)]])
+    rotated_ver_2 = np.transpose(np.dot(rotate_mat, np.transpose(rotated_ver)))
+    atlas['vertices'] = rotated_ver_2
+    write_vtk(atlas, '/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+str(n_vertex)+'.rotated_2.vtk')
 
 
 #####################################################################
@@ -322,91 +345,6 @@ compute_vertex_distance(sphere_163842['vertices'], sphere_163842['faces'])
 
 #####################################################################
 """ check image patches from sphere """
-
-def isATriangle(neigh_orders_163842, face):
-    """
-    neigh_orders_163842: int, (N*7) x 1
-    face: int, 3 x 1
-    """
-    neighs = neigh_orders_163842[face[0]*7:face[0]*7+6]
-    if face[1] not in neighs or face[2] not in neighs:
-        return False
-    neighs = neigh_orders_163842[face[1]*7:face[1]*7+6]
-    if face[2] not in neighs:
-        return False
-    return True
-    
-def sphere_interpolation_7(vertex, vertices, tree, neigh_orders):
-    
-    _, top7_near_vertex_index = tree.query(vertex[np.newaxis,:], k=7) 
-    candi_faces = []
-    for k in itertools.combinations(np.squeeze(top7_near_vertex_index), 3):
-        tmp = np.asarray(k)  # get the indices of the potential candidate triangles
-        if isATriangle(neigh_orders, tmp):
-             candi_faces.append(tmp)
-    candi_faces = np.asarray(candi_faces)     
-
-    orig_vertex_1 = vertices[candi_faces[:,0]]
-    orig_vertex_2 = vertices[candi_faces[:,1]]
-    orig_vertex_3 = vertices[candi_faces[:,2]]
-    edge_12 = orig_vertex_2 - orig_vertex_1        # edge vectors from vertex 1 to 2
-    edge_13 = orig_vertex_3 - orig_vertex_1        # edge vectors from vertex 1 to 3
-    faces_normal = np.cross(edge_12, edge_13)    # normals of all the faces
-
-    # use formula p(x) = <p1,n>/<x,n> * x in spherical demons paper to calculate the intersection with each faces
-    upper = np.sum(orig_vertex_1 * faces_normal, axis=1)
-    lower = np.sum(vertex * faces_normal, axis=1)
-    temp = upper/lower
-    ratio = temp[:, np.newaxis]
-    P = ratio * vertex  # intersection points
-
-    # find the triangle face that the inersection is in, if the intersection
-    # is in, the area of 3 small triangles is equal to the whole one
-    area_BCP = np.linalg.norm(np.cross(orig_vertex_3-P, orig_vertex_2-P), axis=1)/2.0
-    area_ACP = np.linalg.norm(np.cross(orig_vertex_3-P, orig_vertex_1-P), axis=1)/2.0
-    area_ABP = np.linalg.norm(np.cross(orig_vertex_2-P, orig_vertex_1-P), axis=1)/2.0
-    area_ABC = np.linalg.norm(faces_normal, axis=1)/2.0
-    
-    tmp = abs(area_BCP + area_ACP + area_ABP - area_ABC)
-    index = np.argmin(tmp)
-    assert abs(ratio[index] - 1) < 0.001, "projected vertex should be near the vertex!" 
-    assert tmp[index] < 1e-06, "Intersection should be in the triangle"
-    
-    w = np.array([area_BCP[index], area_ACP[index], area_ABP[index]])
-    inter_weight = w / w.sum()
-    return candi_faces[index], inter_weight
-
-def sphere_interpolation(vertex, vertices, tree, neigh_orders):
-    """
-    Compute the three indices and weights for sphere interpolation at given position.
-    
-    moving_warp_phi_3d_i: torch.tensor, size: [3]
-    distance: the distance from each fiexd vertices to the interpolation position
-    """
-    _, top3_near_vertex_index = tree.query(vertex[np.newaxis,:], k=3) 
-    top3_near_vertex_index = np.squeeze(top3_near_vertex_index)
-    if isATriangle(neigh_orders, top3_near_vertex_index):
-        orig_vertex_0 = vertices[top3_near_vertex_index[0]]
-        orig_vertex_1 = vertices[top3_near_vertex_index[1]]
-        orig_vertex_2 = vertices[top3_near_vertex_index[2]]
-        normal = np.cross(orig_vertex_1-orig_vertex_2, orig_vertex_0-orig_vertex_2)
-        
-        vertex_proj = orig_vertex_1.dot(normal)/vertex.dot(normal) * vertex
-        
-        area_BCP = np.linalg.norm(np.cross(orig_vertex_2-vertex_proj, orig_vertex_1-vertex_proj))/2.0
-        area_ACP = np.linalg.norm(np.cross(orig_vertex_2-vertex_proj, orig_vertex_0-vertex_proj))/2.0
-        area_ABP = np.linalg.norm(np.cross(orig_vertex_1-vertex_proj, orig_vertex_0-vertex_proj))/2.0
-        area_ABC = np.linalg.norm(normal)/2.0
-        if abs(area_BCP + area_ACP + area_ABP - area_ABC) > 1e-06:
-            return sphere_interpolation_7(vertex, vertices, tree, neigh_orders)
-             
-        else:
-            inter_weight = np.array([area_BCP, area_ACP, area_ABP])
-            inter_weight = inter_weight / inter_weight.sum()
-            return top3_near_vertex_index, inter_weight
-       
-    else:
-        return sphere_interpolation_7(vertex, vertices, tree, neigh_orders)
 
 i = 1
 shape = [65,65]
@@ -610,28 +548,6 @@ for n_vertex in ns_vertex:
 
 
 #####################################################################
-""" rotate atlas """ 
-
-ns_vertex = [42, 162, 642, 2562, 10242, 40962, 163842]
-for n_vertex in ns_vertex:
-    atlas = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+str(n_vertex)+'_rotated_0.vtk')    
-    vertices = atlas['vertices']
-    rotate_mat = np.array([[np.cos(np.pi/2), 0, np.sin(np.pi/2)],
-                           [0, 1, 0],
-                           [-np.sin(np.pi/2), 0, np.cos(np.pi/2)]])
-    rotated_ver = np.transpose(np.dot(rotate_mat, np.transpose(vertices)))
-    atlas['vertices'] = rotated_ver
-    write_vtk(atlas, '/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+str(n_vertex)+'_rotated_1.vtk')
-
-    rotate_mat = np.array([[1, 0, 0],
-                           [0, np.cos(np.pi/2), -np.sin(np.pi/2)],
-                           [0, np.sin(np.pi/2), np.cos(np.pi/2)]])
-    rotated_ver_2 = np.transpose(np.dot(rotate_mat, np.transpose(rotated_ver)))
-    atlas['vertices'] = rotated_ver_2
-    write_vtk(atlas, '/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+str(n_vertex)+'_rotated_2.vtk')
-
-
-#####################################################################
 """ check rotated vectors """
 
 surf = read_vtk('/media/fenqiang/DATA/unc/Data/registration/data/preprocessed_npy/MNBCP107842_593/MNBCP107842_593.lh.SphereSurf.Orig.sphere.resampled.2562.vtk')
@@ -658,6 +574,18 @@ rotated_surf = {'vertices': rotated_ver,
                 'sulc': surf['sulc'],
                 'deformation': rotated_phi_3d}
 write_vtk(rotated_surf, '/media/fenqiang/DATA/unc/Data/registration/delete_this/test_1.vtk')
+
+
+
+#####################################################################
+""" check intersection """
+
+from utils import check_intersect_vertices
+
+
+files = sorted(glob.glob(os.path.join('/media/fenqiang/DATA/unc/Data/registration/data/orig_data', '*lh*.Orig.vtk'))) 
+age = [float(x.split('/')[-1].split('_')[1].split('.')[0]) for x in files ]
+
 
 
 
