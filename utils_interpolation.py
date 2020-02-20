@@ -9,7 +9,8 @@ import numpy as np
 import itertools
 from sklearn.neighbors import KDTree
 from utils import get_neighs_order
-#import time
+import math, multiprocessing
+
 
 def isATriangle(neigh_orders, face):
     """
@@ -67,7 +68,7 @@ def isInTriangle(vertex, v0, v1, v2):
 
 
 
-def sphere_interpolation_7(vertex, vertices, tree, neigh_orders, k=7):
+def singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=7):
     
     _, top7_near_vertex_index = tree.query(vertex[np.newaxis,:], k=k) 
     candi_faces = []
@@ -75,7 +76,11 @@ def sphere_interpolation_7(vertex, vertices, tree, neigh_orders, k=7):
         tmp = np.asarray(t)  # get the indices of the potential candidate triangles
         if isATriangle(neigh_orders, tmp):
              candi_faces.append(tmp)
-    candi_faces = np.asarray(candi_faces)
+    if candi_faces:
+        candi_faces = np.asarray(candi_faces)
+    else:
+        print("cannot find candidate faces, top k shoulb be larger, function recursion, current k =", k)
+        return singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=k+2)
 
     orig_vertex_1 = vertices[candi_faces[:,0]]
     orig_vertex_2 = vertices[candi_faces[:,1]]
@@ -100,13 +105,13 @@ def sphere_interpolation_7(vertex, vertices, tree, neigh_orders, k=7):
     tmp = area_BCP + area_ACP + area_ABP - area_ABC
     index = np.argmin(tmp)
     assert abs(ratio[index] - 1) < 0.005, "projected vertex should be near the vertex!" 
-    if tmp[index] > 1e-08: 
+    if tmp[index] > 1e-10: 
         print("tmp[index] = ", tmp[index])
         if isInTriangle(vertex, vertices[candi_faces[index][0]], vertices[candi_faces[index][1]], vertices[candi_faces[index][2]]):
             assert False, "threshold should be smaller"
         else:
-            print("top k shoulb be larger, function recursion, current k =", k)
-            return sphere_interpolation_7(vertex, vertices, tree, neigh_orders, k=k+2)
+            print("candidate faces don't contain the correct one, top k shoulb be larger, function recursion, current k =", k)
+            return singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=k+2)
     
     w = np.array([area_BCP[index], area_ACP[index], area_ABP[index]])
     inter_weight = w / w.sum()
@@ -114,12 +119,10 @@ def sphere_interpolation_7(vertex, vertices, tree, neigh_orders, k=7):
     return candi_faces[index], inter_weight
 
 
-def sphere_interpolation(vertex, vertices, tree, neigh_orders):
+def singleVertexInterpo(vertex, vertices, tree, neigh_orders, feat):
     """
     Compute the three indices and weights for sphere interpolation at given position.
     
-    moving_warp_phi_3d_i: torch.tensor, size: [3]
-    distance: the distance from each fiexd vertices to the interpolation position
     """
     _, top3_near_vertex_index = tree.query(vertex[np.newaxis,:], k=3) 
     top3_near_vertex_index = np.squeeze(top3_near_vertex_index)
@@ -136,85 +139,81 @@ def sphere_interpolation(vertex, vertices, tree, neigh_orders):
         area_ABP = np.linalg.norm(np.cross(v1-vertex_proj, v0-vertex_proj))/2.0
         area_ABC = np.linalg.norm(normal)/2.0
         
-        if area_BCP + area_ACP + area_ABP - area_ABC > 1e-08:
-            return sphere_interpolation_7(vertex, vertices, tree, neigh_orders)
+        if area_BCP + area_ACP + area_ABP - area_ABC > 1e-10:
+             inter_indices, inter_weight = singleVertexInterpo_7(vertex, vertices, tree, neigh_orders)
              
         else:
             inter_weight = np.array([area_BCP, area_ACP, area_ABP])
             inter_weight = inter_weight / inter_weight.sum()
-            return top3_near_vertex_index, inter_weight
+            inter_indices = top3_near_vertex_index
        
     else:
-        return sphere_interpolation_7(vertex, vertices, tree, neigh_orders)
+        inter_indices, inter_weight = singleVertexInterpo_7(vertex, vertices, tree, neigh_orders)
+        
+    return np.sum(np.multiply(feat[inter_indices], np.repeat(inter_weight[:,np.newaxis], feat.shape[1], axis=1)), axis=0)
 
+
+def multiVertexInterpo(vertexs, vertices, tree, neigh_orders, feat):
+    feat_inter = np.zeros((vertexs.shape[0], feat.shape[1]))
+    for i in range(vertexs.shape[0]):
+        feat_inter[i,:] = singleVertexInterpo(vertexs[i,:], vertices, tree, neigh_orders, feat)
+    return feat_inter
     
-def resample_sphere_surf(vertices, vertices_inter, feat):
+
+def resampleSphereSurf(vertices_fix, vertices_inter, feat, neigh_orders=None):
     """
-    vertices: N*3, numpy array
-    faces: N*3, numpy array,
-    template_vertices: unknown*3, numpy array, fixed sphere to be interpolated
+    vertices_fix: N*3, numpy array
+    vertices_inter: unknown*3, numpy array, sphere to be interpolated
     feat: N*D, features to be interpolated
     """
-#    template = read_vtk('/media/fenqiang/DATA/unc/Data/registration/presentation/regis_sulc_2562_3d_smooth1_3model/MNBCP124529_588.lh.SphereSurf.Orig.sphere.resampled.2562.DL.moved_2.vtk')
-#    vertices = template['vertices']
+#    template = read_vtk('/media/fenqiang/DATA/unc/Data/registration/presentation/regis_sulc_2562_3d_smooth0p33_phiconsis1_3model/training_10242/MNBCP107842_593.lh.SphereSurf.Orig.sphere.resampled.642.DL.origin_3.phi_resampled.2562.moved.sucu_resampled.2562.DL.origin_3.phi_resampled.10242.moved.vtk')
+#    vertices_fix = template['vertices']
 #    feat = template['sulc']
-#    vertices_inter = read_vtk('/media/fenqiang/DATA/unc/Data/registration/presentation/regis_sulc_10242_3d_smooth1p4_phiconsis_3model/MNBCP000178_494.lh.SphereSurf.Orig.sphere.resampled.10242.DL.moved_3.vtk')
+#    vertices_inter = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.10242.rotated_2.vtk')
 #    vertices_inter = vertices_inter['vertices']
     
-    assert vertices.shape[0] == feat.shape[0], "vertices.shape[0] == feat.shape[0], error"
-    assert vertices.shape[1] == 3, "vertices size not right"
+    assert vertices_fix.shape[0] == feat.shape[0], "vertices.shape[0] == feat.shape[0], error"
+    assert vertices_fix.shape[1] == 3, "vertices size not right"
     
-    vertices = vertices.astype(np.float64)
+    vertices_fix = vertices_fix.astype(np.float64)
     vertices_inter = vertices_inter.astype(np.float64)
     feat = feat.astype(np.float64)
     
-    vertices = vertices / np.linalg.norm(vertices, axis=1)[:,np.newaxis]  # normalize to 1
+    vertices_fix = vertices_fix / np.linalg.norm(vertices_fix, axis=1)[:,np.newaxis]  # normalize to 1
     vertices_inter = vertices_inter / np.linalg.norm(vertices_inter, axis=1)[:,np.newaxis]  # normalize to 1
     
     if len(feat.shape) == 1:
         feat = feat[:,np.newaxis]
         
-    n_vertex = vertices.shape[0]
-    neigh_orders = get_neighs_order('neigh_indices/adj_mat_order_'+ str(n_vertex) +'_rotated_0.mat')
-    feat_inter = np.zeros((vertices_inter.shape[0], feat.shape[1]))
+    if neigh_orders == None:
+        neigh_orders = get_neighs_order('neigh_indices/adj_mat_order_'+ str(vertices_fix.shape[0]) +'_rotated_0.mat')
     
-    tree = KDTree(vertices, leaf_size=10)  # build kdtree
-    for i in range(vertices_inter.shape[0]):
+    feat_inter = np.zeros((vertices_inter.shape[0], feat.shape[1]))
+    tree = KDTree(vertices_fix, leaf_size=10)  # build kdtree
+    
+    
+    """ Single process, single thread: 163842: 54.5s, 40962: 12.7s, 10242: 3.2s, 2562: 0.8s """
+#    for i in range(vertices_inter.shape[0]):
 #        print(i)
-        inter_indices, inter_weight = sphere_interpolation(vertices_inter[i,:], vertices, tree, neigh_orders)
-        feat_inter[i,:] = np.sum(np.multiply(feat[inter_indices], np.repeat(inter_weight[:,np.newaxis], feat.shape[1], axis=1)), axis=0)
+#        feat_inter[i,:] = singleVertexInterpo(vertices_inter[i,:], vertices_fix, tree, neigh_orders, feat)
+       
+
+    """ multiple processes method: 163842: 9.6s, 40962: 2.8s, 10242: 1.0s, 2562: 0.28s """
+    pool = multiprocessing.Pool()
+    cpus = multiprocessing.cpu_count()
+    vertexs_num_per_cpu = math.ceil(vertices_inter.shape[0]/cpus)
+    results = []
+    
+    for i in range(cpus):
+        results.append(pool.apply_async(multiVertexInterpo, args=(vertices_inter[i*vertexs_num_per_cpu:(i+1)*vertexs_num_per_cpu,:], vertices_fix, tree, neigh_orders, feat,)))
+
+    pool.close()
+    pool.join()
+
+    for i in range(cpus):
+        feat_inter[i*vertexs_num_per_cpu:(i+1)*vertexs_num_per_cpu,:] = results[i].get()
         
     return np.squeeze(feat_inter)
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
         
         
         

@@ -14,7 +14,7 @@ from utils import get_orthonormal_vectors, Get_neighs_order
 import matplotlib.pyplot as plt
 from sklearn.neighbors import KDTree
 import scipy.io as sio 
-from utils_interpolation import sphere_interpolation
+from utils_interpolation import singleVertexInterpo
 
 #####################################################################
 """ compute the number of subjects of each month """
@@ -385,7 +385,7 @@ for p in range(shape[0]):
             sphere_loc = rot_mat.dot(vertices[i])
             assert abs(np.linalg.norm(sphere_loc) - 100) < 0.01
             
-            inter_indices[p*shape[0]+q,:], inter_weights[p*shape[0]+q,:] = sphere_interpolation(sphere_loc, vertices, tree, neigh_orders_163842)
+            inter_indices[p*shape[0]+q,:], inter_weights[p*shape[0]+q,:] = singleVertexInterpo(sphere_loc, vertices, tree, neigh_orders_163842)
     
 patch = np.sum(np.multiply((sulc[inter_indices.flatten()]).reshape((inter_indices.shape[0], inter_indices.shape[1])), inter_weights), axis=1)
 patch = patch.reshape((shape[0],shape[1]))
@@ -588,4 +588,11 @@ age = [float(x.split('/')[-1].split('_')[1].split('.')[0]) for x in files ]
 
 
 
-
+#####################################################################
+""" Convert vtk to npy """
+files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/presentation/regis_sulc_10242_3d_smooth0p8_phiconsis1_3model_one_step_truncated/training_40962/*.40962.vtk'))
+for file in files:
+    data = read_vtk(file)
+    data = np.concatenate((data['curv'][:,np.newaxis], data['sulc'][:,np.newaxis]), axis=1)
+    np.save(file.replace('.vtk','.npy'), data)
+    

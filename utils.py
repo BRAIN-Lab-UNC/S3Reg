@@ -12,6 +12,7 @@ import glob
 import os
 from numpy import median
 from utils_vtk import read_vtk
+import math, multiprocessing
 
 
 def Get_neighs_order(rotated=0):
@@ -194,22 +195,18 @@ def get_z_weight(n_vertex, rotated=0):
     return z_weight
 
 
-def check_intersect_vertices(vertices, faces):
-    """
-    vertices: N * 3, numpy array, float 64
-    faces: (N*2-4) * 3, numpy array, float 64
-    """
-#    template = read_vtk('/media/fenqiang/DATA/unc/Data/registration/presentation/regis_sulc_2562_3d_smooth1_3model/MNBCP124529_588.lh.SphereSurf.Orig.sphere.resampled.2562.DL.moved_2.vtk')
-#    vertices = template['vertices']
-#    faces = template['faces'][:,1:]
-    
-    assert vertices.shape[1] == 3, "vertices size not right"
-    assert faces.shape[1] == 3, "faces size not right"
-    assert 2*len(vertices)-4 == len(faces), "vertices are not consistent with faces."
-    
-    vertices = vertices.astype(np.float64)
-    top_k = int(len(vertices)/3.0)
-    
+def get_vertex_dis(n_vertex):
+    vertex_dis_dic = {42: 54.6,
+                      162: 27.5,
+                      642: 13.8,
+                      2562: 6.9,
+                      10242: 3.4,
+                      40962: 1.7,
+                      163842: 0.8}
+    return vertex_dis_dic[n_vertex]
+
+
+def check_intersect_vertices_worker(vertices, faces, top_k):
     intersect = []
     for i in range(len(faces)):
         face = faces[i,:]
@@ -232,9 +229,7 @@ def check_intersect_vertices(vertices, faces):
         normal = np.cross(orig_vertex_1-orig_vertex_3, orig_vertex_2-orig_vertex_3)    # normals of the face
           
         # use formula p(x) = <p1,n>/<x,n> * x in spherical demons paper to calculate the intersection with the triangle face
-        upper = np.sum(orig_vertex_1 * normal)
-        lower = np.sum(vertices[ind,:] * normal, axis=1)
-        ratio = upper/lower
+        ratio = np.sum(orig_vertex_1 * normal)/np.sum(vertices[ind,:] * normal, axis=1)
         P = np.repeat(ratio[:,np.newaxis], 3, axis=1) * vertices[ind,:]  # intersection points
         
         area_BCP = np.linalg.norm(np.cross(orig_vertex_3-P, orig_vertex_2-P), axis=1)/2.0
@@ -245,11 +240,11 @@ def check_intersect_vertices(vertices, faces):
         tmp = area_BCP + area_ACP + area_ABP - area_ABC
         
         candi = []
-        candi.append((tmp <= 1e-4).nonzero()[0])
+        candi.append((tmp <= 1e-5).nonzero()[0])
         
         candi = ind[candi]
         for t in face:
-            assert t in candi, "t in candi, error"
+            assert t in candi, "t not in candi, error"
         pending_del = []
         for t in face:
             pending_del.append(np.argwhere(candi==t)[0])
@@ -258,5 +253,39 @@ def check_intersect_vertices(vertices, faces):
         for k in range(len(candi)):
              intersect.append([i, candi[k]])
        
+    return intersect
+    
+def check_intersect_vertices(vertices, faces):
+    """
+    vertices: N * 3, numpy array, float 64
+    faces: (N*2-4) * 3, numpy array, float 64
+    """
+#    template = read_vtk('/media/fenqiang/DATA/unc/Data/registration/presentation/regis_sulc_2562_3d_smooth1_3model/MNBCP124529_588.lh.SphereSurf.Orig.sphere.resampled.2562.DL.moved_2.vtk')
+#    vertices = template['vertices']
+#    faces = template['faces'][:,1:]
+    
+    assert vertices.shape[1] == 3, "vertices size not right"
+    assert faces.shape[1] == 3, "faces size not right"
+    assert 2*len(vertices)-4 == len(faces), "vertices are not consistent with faces."
+    
+    vertices = vertices.astype(np.float64)
+    top_k = int(len(vertices)/3.0)
+    
+    """ multiple processes method: 163842: 9.6s, 40962: 2.8s, 10242: 1.0s, 2562: 0.28s """
+    pool = multiprocessing.Pool()
+    cpus = multiprocessing.cpu_count()
+    faces_num_per_cpu = math.ceil(faces.shape[0]/cpus)
+    results = []
+    
+    for i in range(cpus):
+        results.append(pool.apply_async(check_intersect_vertices_worker, args=(vertices, faces[i*faces_num_per_cpu:(i+1)*faces_num_per_cpu,:], top_k)))
+
+    pool.close()
+    pool.join()
+
+    intersect = []
+    for i in range(cpus):
+        intersect = intersect + results[i].get()
+    
     intersect = np.asarray(intersect)
     return intersect.size == 0

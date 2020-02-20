@@ -12,8 +12,8 @@ import torchvision
 import numpy as np
 import glob
 
-from utils_torch import sphere_interpolation
-from utils import Get_neighs_order, get_orthonormal_vectors, get_z_weight
+from utils_torch import resampleSphereSurf
+from utils import Get_neighs_order, get_orthonormal_vectors, get_z_weight, get_vertex_dis
 from utils_vtk import read_vtk, write_vtk
 
 from model import Unet
@@ -23,29 +23,34 @@ from model import Unet
 
 in_ch = 2   # one for sulc in fixed, one for sulc in moving
 out_ch = 2  # two components for tangent plane deformation vector 
-device = torch.device('cuda:1')
+device = torch.device('cuda:0')
 batch_size = 1
 data_for_test = 0.3
-fix_vertex_dis = 0.3
-model_name = 'regis_sulc_642_3d_smooth0p3_phiconsis0p5_3model'
+model_name = 'regis_sulc_10242_3d_smooth0p8_phiconsis1_3model'
+truncated = True
 
-n_vertex = 642
+n_vertex = int(model_name.split('_')[2])
 
 ###########################################################
 """ split files, only need 18 month now"""
 
-files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/data/preprocessed_npy/*/*.lh.SphereSurf.Orig.sphere.resampled.'+str(n_vertex)+'.npy'))
-files = [x for x in files if float(x.split('/')[-1].split('_')[1].split('.')[0]) >=450 and float(x.split('/')[-1].split('_')[1].split('.')[0]) <= 630]
+#files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/data/preprocessed_npy/*/*.lh.SphereSurf.Orig.sphere.resampled.'+str(n_vertex)+'.npy'))
+#files = [x for x in files if float(x.split('/')[-1].split('_')[1].split('.')[0]) >=450 and float(x.split('/')[-1].split('_')[1].split('.')[0]) <= 630]
+
+# training 2562, interpolated from 642 for next level training
+#files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/presentation/regis_sulc_642_3d_smooth0p4_phiconsis0p6_3model/training_2562/*sucu_resampled.2562.npy'))
+files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/presentation/regis_sulc_2562_3d_smooth0p33_phiconsis1_3model/training_10242/*sucu_resampled.10242.npy'))
+
 test_files = [ files[x] for x in range(int(len(files)*data_for_test)) ]
 train_files = [ files[x] for x in range(int(len(files)*data_for_test), len(files)) ]
 
 ###########################################################
 """ load fixed/atlas surface, smooth filter, global parameter pre-defined """
 
-fixed_0 = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+str(n_vertex)+'_rotated_0.vtk')
-fixed_faces = fixed_0['faces']
-fixed_faces = torch.from_numpy(fixed_faces[:,[1,2,3]]).cuda(device)
-fixed_faces = torch.sort(fixed_faces, axis=1)[0]
+fix_vertex_dis = get_vertex_dis(n_vertex)/100.0
+max_disp = 0.5*fix_vertex_dis
+
+fixed_0 = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+str(n_vertex)+'.rotated_0.vtk')
 fixed_sulc = (fixed_0['sulc'] + 11.5)/(13.65+11.5)
 fixed_sulc = fixed_sulc[:, np.newaxis]
 fixed_sulc = torch.from_numpy(fixed_sulc.astype(np.float32)).cuda(device)
@@ -53,11 +58,11 @@ fixed_sulc = torch.from_numpy(fixed_sulc.astype(np.float32)).cuda(device)
 fixed_xyz_0 = fixed_0['vertices']/100.0  # fixed spherical coordinate
 fixed_xyz_0 = torch.from_numpy(fixed_xyz_0.astype(np.float32)).cuda(device)
 
-fixed_1 = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+str(n_vertex)+'_rotated_1.vtk')
+fixed_1 = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+str(n_vertex)+'.rotated_1.vtk')
 fixed_xyz_1 = fixed_1['vertices']/100.0  # fixed spherical coordinate
 fixed_xyz_1 = torch.from_numpy(fixed_xyz_1.astype(np.float32)).cuda(device)
 
-fixed_2 = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+str(n_vertex)+'_rotated_2.vtk')
+fixed_2 = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+str(n_vertex)+'.rotated_2.vtk')
 fixed_xyz_2 = fixed_2['vertices']/100.0  # fixed spherical coordinate
 fixed_xyz_2 = torch.from_numpy(fixed_xyz_2.astype(np.float32)).cuda(device)
 
@@ -197,6 +202,14 @@ def test(dataloader):
             phi_2d_2 = model_2(data)
     #        phi_2d = torch.tanh(phi_2d) * fix_vertex_dis
             
+            if truncated:
+                tmp = torch.norm(phi_2d_0, dim=1) > max_disp
+                phi_2d_0[tmp] = phi_2d_0[tmp] / (torch.norm(phi_2d_0[tmp], dim=1, keepdim=True).repeat(1,2)) * max_disp
+                tmp = torch.norm(phi_2d_1, dim=1) > max_disp
+                phi_2d_1[tmp] = phi_2d_1[tmp] / (torch.norm(phi_2d_1[tmp], dim=1, keepdim=True).repeat(1,2)) * max_disp
+                tmp = torch.norm(phi_2d_2, dim=1) > max_disp
+                phi_2d_2[tmp] = phi_2d_2[tmp] / (torch.norm(phi_2d_2[tmp], dim=1, keepdim=True).repeat(1,2)) * max_disp
+
             phi_3d_0 = torch.zeros(3, len(En_0)).cuda(device)
             for j in range(len(En_0)):
                 phi_3d_0[:,j] = torch.squeeze(torch.mm(En_0[j,:,:], torch.unsqueeze(phi_2d_0[j,:],1)))
@@ -226,9 +239,9 @@ def test(dataloader):
             moving_warp_phi_3d_2 = moving_warp_phi_3d_2/(torch.norm(moving_warp_phi_3d_2, dim=1, keepdim=True).repeat(1,3)) # normalize the deformed vertices onto the sphere
             
             """ compute interpolation values on fixed surface """
-            fixed_inter_0 = sphere_interpolation(moving_warp_phi_3d_0, fixed_xyz_0, fixed_sulc, neigh_orders, device)
-            fixed_inter_1 = sphere_interpolation(moving_warp_phi_3d_1, fixed_xyz_1, fixed_sulc, neigh_orders, device)
-            fixed_inter_2 = sphere_interpolation(moving_warp_phi_3d_2, fixed_xyz_2, fixed_sulc, neigh_orders, device)
+            fixed_inter_0 = resampleSphereSurf(moving_warp_phi_3d_0, fixed_xyz_0, fixed_sulc, neigh_orders, device)
+            fixed_inter_1 = resampleSphereSurf(moving_warp_phi_3d_1, fixed_xyz_1, fixed_sulc, neigh_orders, device)
+            fixed_inter_2 = resampleSphereSurf(moving_warp_phi_3d_2, fixed_xyz_2, fixed_sulc, neigh_orders, device)
             
             mae_0[batch_idx] = torch.mean(torch.abs(fixed_inter_0 - moving) * z_weight_0.unsqueeze(1))
             mae_1[batch_idx] = torch.mean(torch.abs(fixed_inter_1 - moving) * z_weight_1.unsqueeze(1))
@@ -251,32 +264,32 @@ def test(dataloader):
             moved = {'vertices': moving_warp_phi_3d_0.detach().cpu().numpy()*100.0,
                     'faces': fixed_0['faces'],
                     'sulc': moving.detach().cpu().numpy() * (13.65+11.5) - 11.5}
-            write_vtk(moved, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name +'/' + file[0].split('/')[10][:-3] + 'DL.moved_0.vtk')
+            write_vtk(moved, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name +'/' + file[0].split('/')[-1][:-3] + 'DL.moved_0.vtk')
             origin = {'vertices': fixed_0['vertices'],
                      'faces': fixed_0['faces'],
                      'deformation': phi_3d_0.detach().cpu().numpy() * 100.0,
                      'sulc': moving.detach().cpu().numpy() * (13.65+11.5) - 11.5}
-            write_vtk(origin, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name + '/' + file[0].split('/')[10][:-3] + 'DL.origin_0.vtk')
+            write_vtk(origin, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name + '/' + file[0].split('/')[-1][:-3] + 'DL.origin_0.vtk')
             
             moved = {'vertices': moving_warp_phi_3d_1.detach().cpu().numpy()*100.0,
                     'faces': fixed_1['faces'],
                     'sulc': moving.detach().cpu().numpy() * (13.65+11.5) - 11.5}
-            write_vtk(moved, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name +'/' + file[0].split('/')[10][:-3] + 'DL.moved_1.vtk')
+            write_vtk(moved, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name +'/' + file[0].split('/')[-1][:-3] + 'DL.moved_1.vtk')
             origin = {'vertices': fixed_1['vertices'],
                      'faces': fixed_1['faces'],
                      'deformation': phi_3d_1.detach().cpu().numpy() * 100.0,
                      'sulc': moving.detach().cpu().numpy() * (13.65+11.5) - 11.5}
-            write_vtk(origin, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name + '/' + file[0].split('/')[10][:-3] + 'DL.origin_1.vtk')
+            write_vtk(origin, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name + '/' + file[0].split('/')[-1][:-3] + 'DL.origin_1.vtk')
             
             moved = {'vertices': moving_warp_phi_3d_2.detach().cpu().numpy()*100.0,
                     'faces': fixed_2['faces'],
                     'sulc': moving.detach().cpu().numpy() * (13.65+11.5) - 11.5}
-            write_vtk(moved, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name +'/' + file[0].split('/')[10][:-3] + 'DL.moved_2.vtk')
+            write_vtk(moved, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name +'/' + file[0].split('/')[-1][:-3] + 'DL.moved_2.vtk')
             origin = {'vertices': fixed_2['vertices'],
                      'faces': fixed_2['faces'],
                      'deformation': phi_3d_2.detach().cpu().numpy() * 100.0,
                      'sulc': moving.detach().cpu().numpy() * (13.65+11.5) - 11.5}
-            write_vtk(origin, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name + '/' + file[0].split('/')[10][:-3] + 'DL.origin_2.vtk')
+            write_vtk(origin, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name + '/' + file[0].split('/')[-1][:-3] + 'DL.origin_2.vtk')
             
             # Combine all phi_3d together
             phi_3d = torch.zeros(len(En_0), 3).cuda(device)
@@ -293,12 +306,12 @@ def test(dataloader):
             moved = {'vertices': moving_warp_phi_3d.detach().cpu().numpy()*100.0,
                     'faces': fixed_0['faces'],
                     'sulc': moving.detach().cpu().numpy() * (13.65+11.5) - 11.5}
-            write_vtk(moved, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name +'/' + file[0].split('/')[10][:-3] + 'DL.moved_3.vtk')
+            write_vtk(moved, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name +'/' + file[0].split('/')[-1][:-3] + 'DL.moved_3.vtk')
             origin = {'vertices': fixed_0['vertices'],
                      'faces': fixed_0['faces'],
                      'deformation': phi_3d.detach().cpu().numpy() * 100.0,
                      'sulc': moving.detach().cpu().numpy() * (13.65+11.5) - 11.5}
-            write_vtk(origin, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name + '/' + file[0].split('/')[10][:-3] + 'DL.origin_3.vtk')
+            write_vtk(origin, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name + '/' + file[0].split('/')[-1][:-3] + 'DL.origin_3.vtk')
             
         
     return mae_0, smooth_0, mae_1, smooth_1, mae_2, smooth_2, phi_consis_01, phi_consis_12, phi_consis_02
