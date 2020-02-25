@@ -8,9 +8,7 @@ Created on Mon Nov 12 14:18:30 2018
 """
 
 import torch
-import numpy as np
 import torch.nn as nn
-import torch.nn.functional as F
 from utils import Get_neighs_order, Get_upconv_index
 from layers import onering_conv_layer, pool_layer, upconv_layer
 #from unet_parts import *

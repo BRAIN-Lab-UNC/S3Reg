@@ -79,8 +79,9 @@ def singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=7):
     if candi_faces:
         candi_faces = np.asarray(candi_faces)
     else:
-        print("cannot find candidate faces, top k shoulb be larger, function recursion, current k =", k)
-        return singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=k+2)
+        if k > 20:
+            print("cannot find candidate faces, top k shoulb be larger, function recursion, current k =", k)
+        return singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=k+3)
 
     orig_vertex_1 = vertices[candi_faces[:,0]]
     orig_vertex_2 = vertices[candi_faces[:,1]]
@@ -104,15 +105,17 @@ def singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=7):
     
     tmp = area_BCP + area_ACP + area_ABP - area_ABC
     index = np.argmin(tmp)
-    assert abs(ratio[index] - 1) < 0.005, "projected vertex should be near the vertex!" 
+    
     if tmp[index] > 1e-10: 
-        print("tmp[index] = ", tmp[index])
+#        print("tmp[index] = ", tmp[index])
         if isInTriangle(vertex, vertices[candi_faces[index][0]], vertices[candi_faces[index][1]], vertices[candi_faces[index][2]]):
             assert False, "threshold should be smaller"
         else:
-            print("candidate faces don't contain the correct one, top k shoulb be larger, function recursion, current k =", k)
-            return singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=k+2)
+            if k > 20:
+                print("candidate faces don't contain the correct one, top k shoulb be larger, function recursion, current k =", k)
+            return singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=k+3)
     
+    assert abs(ratio[index] - 1) < 0.005, "projected vertex should be near the vertex!" 
     w = np.array([area_BCP[index], area_ACP[index], area_ABP[index]])
     inter_weight = w / w.sum()
     

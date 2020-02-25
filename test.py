@@ -11,8 +11,9 @@ import torch
 import torchvision
 import numpy as np
 import glob
+import os
 
-from utils_torch import resampleSphereSurf
+from utils_interpolation import resampleSphereSurf
 from utils import Get_neighs_order, get_orthonormal_vectors, get_z_weight, get_vertex_dis
 from utils_vtk import read_vtk, write_vtk
 
@@ -26,8 +27,9 @@ out_ch = 2  # two components for tangent plane deformation vector
 device = torch.device('cuda:0')
 batch_size = 1
 data_for_test = 0.3
-model_name = 'regis_sulc_10242_3d_smooth0p8_phiconsis1_3model'
-truncated = True
+model_name = 'regis_curv_40962_3d_smooth0p2_phiconsis0p5_3model'
+truncated = False
+regis_feat = 'curv' # 'sulc' or 'curv'
 
 n_vertex = int(model_name.split('_')[2])
 
@@ -39,7 +41,8 @@ n_vertex = int(model_name.split('_')[2])
 
 # training 2562, interpolated from 642 for next level training
 #files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/presentation/regis_sulc_642_3d_smooth0p4_phiconsis0p6_3model/training_2562/*sucu_resampled.2562.npy'))
-files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/presentation/regis_sulc_2562_3d_smooth0p33_phiconsis1_3model/training_10242/*sucu_resampled.10242.npy'))
+#files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/presentation/regis_sulc_2562_3d_smooth0p33_phiconsis1_3model/training_10242/*sucu_resampled.10242.npy'))
+files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/presentation/regis_sulc_10242_3d_smooth0p8_phiconsis1_3model_one_step_truncated/training_40962/*.40962.npy'))
 
 test_files = [ files[x] for x in range(int(len(files)*data_for_test)) ]
 train_files = [ files[x] for x in range(int(len(files)*data_for_test), len(files)) ]
@@ -48,10 +51,15 @@ train_files = [ files[x] for x in range(int(len(files)*data_for_test), len(files
 """ load fixed/atlas surface, smooth filter, global parameter pre-defined """
 
 fix_vertex_dis = get_vertex_dis(n_vertex)/100.0
-max_disp = 0.5*fix_vertex_dis
+max_disp = 0.45*fix_vertex_dis
 
 fixed_0 = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+str(n_vertex)+'.rotated_0.vtk')
-fixed_sulc = (fixed_0['sulc'] + 11.5)/(13.65+11.5)
+if regis_feat == 'sulc':
+    fixed_sulc = (fixed_0['sulc'] + 11.5)/(13.65+11.5)
+elif regis_feat == 'curv' :
+    fixed_sulc = (fixed_0['curv'] + 2.32)/(2.08+2.32)
+else:
+    raise NotImplementedError('feat should be curv or sulc.')
 fixed_sulc = fixed_sulc[:, np.newaxis]
 fixed_sulc = torch.from_numpy(fixed_sulc.astype(np.float32)).cuda(device)
 
@@ -137,30 +145,35 @@ En_2 = get_orthonormal_vectors(n_vertex, rotated=2)
 En_2 = torch.from_numpy(En_2.astype(np.float32)).cuda(device)
 
 #############################################################
+
 class BrainSphere(torch.utils.data.Dataset):
 
-    def __init__(self, files):
+    def __init__(self, files, regis_feat):
         self.files = files
+        self.regis_feat = regis_feat
 
     def __getitem__(self, index):
         file = self.files[index]
         data = np.load(file)
-        sulc = (data[:,1]+11.5)/(13.65+11.5)
+        if self.regis_feat == 'sulc':
+            sulc = (data[:,1]+11.5)/(13.65+11.5)
+        else:
+            sulc = (data[:,0]+2.32)/(2.08+2.32)
         
         return sulc.astype(np.float32), file
 
     def __len__(self):
         return len(self.files)
 
-train_dataset = BrainSphere(train_files)
-train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=False, pin_memory=True)
-val_dataset = BrainSphere(test_files)
-val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, shuffle=False, pin_memory=True)
+train_dataset = BrainSphere(train_files, regis_feat)
+train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=False, pin_memory=False)
+val_dataset = BrainSphere(test_files, regis_feat)
+val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size=batch_size, shuffle=False, pin_memory=False)
 
 
 model_0 = Unet(in_ch=in_ch, out_ch=out_ch, level=level, n_res=n_res, rotated=0)
-model_0.load_state_dict(torch.load('/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/' + model_name + '_0.mdl'))
 model_0.cuda(device)
+model_0.load_state_dict(torch.load('/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/' + model_name + '_0.mdl'))
 
 model_1 = Unet(in_ch=in_ch, out_ch=out_ch, level=level, n_res=n_res, rotated=1)
 model_1.cuda(device)
@@ -180,15 +193,15 @@ def test(dataloader):
     model_1.eval()
     model_2.eval()
     
-    mae_0 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
-    smooth_0 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
-    mae_1 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
-    smooth_1 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
-    mae_2 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
-    smooth_2 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
-    phi_consis_01 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
-    phi_consis_12 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
-    phi_consis_02 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
+#    mae_0 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
+#    smooth_0 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
+#    mae_1 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
+#    smooth_1 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
+#    mae_2 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
+#    smooth_2 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
+#    phi_consis_01 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
+#    phi_consis_12 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
+#    phi_consis_02 = torch.zeros(len(dataloader), dtype=torch.float32, device=device, requires_grad=False)
 
     with torch.no_grad():
         for batch_idx, (moving, file) in enumerate(dataloader):
@@ -239,56 +252,59 @@ def test(dataloader):
             moving_warp_phi_3d_2 = moving_warp_phi_3d_2/(torch.norm(moving_warp_phi_3d_2, dim=1, keepdim=True).repeat(1,3)) # normalize the deformed vertices onto the sphere
             
             """ compute interpolation values on fixed surface """
-            fixed_inter_0 = resampleSphereSurf(moving_warp_phi_3d_0, fixed_xyz_0, fixed_sulc, neigh_orders, device)
-            fixed_inter_1 = resampleSphereSurf(moving_warp_phi_3d_1, fixed_xyz_1, fixed_sulc, neigh_orders, device)
-            fixed_inter_2 = resampleSphereSurf(moving_warp_phi_3d_2, fixed_xyz_2, fixed_sulc, neigh_orders, device)
+            fixed_inter_0 = resampleSphereSurf(fixed_xyz_0.detach().cpu().numpy(), moving_warp_phi_3d_0.detach().cpu().numpy(), fixed_sulc.detach().cpu().numpy())
+            fixed_inter_0 = torch.from_numpy(fixed_inter_0.astype(np.float32)).cuda(device)
+            fixed_inter_1 = resampleSphereSurf(fixed_xyz_1.detach().cpu().numpy(), moving_warp_phi_3d_1.detach().cpu().numpy(), fixed_sulc.detach().cpu().numpy())
+            fixed_inter_1 = torch.from_numpy(fixed_inter_1.astype(np.float32)).cuda(device)
+            fixed_inter_2 = resampleSphereSurf(fixed_xyz_2.detach().cpu().numpy(), moving_warp_phi_3d_2.detach().cpu().numpy(), fixed_sulc.detach().cpu().numpy())
+            fixed_inter_2 = torch.from_numpy(fixed_inter_2.astype(np.float32)).cuda(device)
             
-            mae_0[batch_idx] = torch.mean(torch.abs(fixed_inter_0 - moving) * z_weight_0.unsqueeze(1))
-            mae_1[batch_idx] = torch.mean(torch.abs(fixed_inter_1 - moving) * z_weight_1.unsqueeze(1))
-            mae_2[batch_idx] = torch.mean(torch.abs(fixed_inter_2 - moving) * z_weight_2.unsqueeze(1))
-            
-            smooth_0[batch_idx] = torch.mean(torch.abs(torch.mm(phi_3d_0[:,[0]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_0.unsqueeze(1)) + \
-                                             torch.abs(torch.mm(phi_3d_0[:,[1]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_0.unsqueeze(1)) + \
-                                             torch.abs(torch.mm(phi_3d_0[:,[2]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_0.unsqueeze(1)))
-            smooth_1[batch_idx] = torch.mean(torch.abs(torch.mm(phi_3d_1[:,[0]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_1.unsqueeze(1)) + \
-                                             torch.abs(torch.mm(phi_3d_1[:,[1]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_1.unsqueeze(1)) + \
-                                             torch.abs(torch.mm(phi_3d_1[:,[2]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_1.unsqueeze(1)))
-            smooth_2[batch_idx] = torch.mean(torch.abs(torch.mm(phi_3d_2[:,[0]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_2.unsqueeze(1)) + \
-                                             torch.abs(torch.mm(phi_3d_2[:,[1]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_2.unsqueeze(1)) + \
-                                             torch.abs(torch.mm(phi_3d_2[:,[2]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_2.unsqueeze(1)))
-            
-            phi_consis_01[batch_idx] = torch.mean(torch.abs(phi_3d_0_to_1[index_01] - phi_3d_1[index_01]))
-            phi_consis_12[batch_idx] = torch.mean(torch.abs(phi_3d_1_to_2[index_12] - phi_3d_2[index_12]))
-            phi_consis_02[batch_idx] = torch.mean(torch.abs(phi_3d_0_to_2[index_02] - phi_3d_2[index_02]))
+#            mae_0[batch_idx] = torch.mean(torch.abs(fixed_inter_0 - moving) * z_weight_0.unsqueeze(1))
+#            mae_1[batch_idx] = torch.mean(torch.abs(fixed_inter_1 - moving) * z_weight_1.unsqueeze(1))
+#            mae_2[batch_idx] = torch.mean(torch.abs(fixed_inter_2 - moving) * z_weight_2.unsqueeze(1))
+#            
+#            smooth_0[batch_idx] = torch.mean(torch.abs(torch.mm(phi_3d_0[:,[0]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_0.unsqueeze(1)) + \
+#                                             torch.abs(torch.mm(phi_3d_0[:,[1]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_0.unsqueeze(1)) + \
+#                                             torch.abs(torch.mm(phi_3d_0[:,[2]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_0.unsqueeze(1)))
+#            smooth_1[batch_idx] = torch.mean(torch.abs(torch.mm(phi_3d_1[:,[0]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_1.unsqueeze(1)) + \
+#                                             torch.abs(torch.mm(phi_3d_1[:,[1]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_1.unsqueeze(1)) + \
+#                                             torch.abs(torch.mm(phi_3d_1[:,[2]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_1.unsqueeze(1)))
+#            smooth_2[batch_idx] = torch.mean(torch.abs(torch.mm(phi_3d_2[:,[0]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_2.unsqueeze(1)) + \
+#                                             torch.abs(torch.mm(phi_3d_2[:,[1]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_2.unsqueeze(1)) + \
+#                                             torch.abs(torch.mm(phi_3d_2[:,[2]][neigh_orders].view(n_vertex, 7), grad_filter) * z_weight_2.unsqueeze(1)))
+#            
+#            phi_consis_01[batch_idx] = torch.mean(torch.abs(phi_3d_0_to_1[index_01] - phi_3d_1[index_01]))
+#            phi_consis_12[batch_idx] = torch.mean(torch.abs(phi_3d_1_to_2[index_12] - phi_3d_2[index_12]))
+#            phi_consis_02[batch_idx] = torch.mean(torch.abs(phi_3d_0_to_2[index_02] - phi_3d_2[index_02]))
             
             moved = {'vertices': moving_warp_phi_3d_0.detach().cpu().numpy()*100.0,
                     'faces': fixed_0['faces'],
-                    'sulc': moving.detach().cpu().numpy() * (13.65+11.5) - 11.5}
+                    'curv': moving.detach().cpu().numpy() * (2.08+2.32) - 2.32}
             write_vtk(moved, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name +'/' + file[0].split('/')[-1][:-3] + 'DL.moved_0.vtk')
             origin = {'vertices': fixed_0['vertices'],
                      'faces': fixed_0['faces'],
                      'deformation': phi_3d_0.detach().cpu().numpy() * 100.0,
-                     'sulc': moving.detach().cpu().numpy() * (13.65+11.5) - 11.5}
+                     'curv': moving.detach().cpu().numpy() * (2.08+2.32) - 2.32}
             write_vtk(origin, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name + '/' + file[0].split('/')[-1][:-3] + 'DL.origin_0.vtk')
             
             moved = {'vertices': moving_warp_phi_3d_1.detach().cpu().numpy()*100.0,
                     'faces': fixed_1['faces'],
-                    'sulc': moving.detach().cpu().numpy() * (13.65+11.5) - 11.5}
+                    'curv': moving.detach().cpu().numpy() * (2.08+2.32) - 2.32}
             write_vtk(moved, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name +'/' + file[0].split('/')[-1][:-3] + 'DL.moved_1.vtk')
             origin = {'vertices': fixed_1['vertices'],
                      'faces': fixed_1['faces'],
                      'deformation': phi_3d_1.detach().cpu().numpy() * 100.0,
-                     'sulc': moving.detach().cpu().numpy() * (13.65+11.5) - 11.5}
+                     'curv': moving.detach().cpu().numpy() * (2.08+2.32) - 2.32}
             write_vtk(origin, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name + '/' + file[0].split('/')[-1][:-3] + 'DL.origin_1.vtk')
             
             moved = {'vertices': moving_warp_phi_3d_2.detach().cpu().numpy()*100.0,
                     'faces': fixed_2['faces'],
-                    'sulc': moving.detach().cpu().numpy() * (13.65+11.5) - 11.5}
+                    'curv': moving.detach().cpu().numpy() * (2.08+2.32) - 2.32}
             write_vtk(moved, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name +'/' + file[0].split('/')[-1][:-3] + 'DL.moved_2.vtk')
             origin = {'vertices': fixed_2['vertices'],
                      'faces': fixed_2['faces'],
                      'deformation': phi_3d_2.detach().cpu().numpy() * 100.0,
-                     'sulc': moving.detach().cpu().numpy() * (13.65+11.5) - 11.5}
+                     'curv': moving.detach().cpu().numpy() * (2.08+2.32) - 2.32}
             write_vtk(origin, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name + '/' + file[0].split('/')[-1][:-3] + 'DL.origin_2.vtk')
             
             # Combine all phi_3d together
@@ -305,41 +321,43 @@ def test(dataloader):
             
             moved = {'vertices': moving_warp_phi_3d.detach().cpu().numpy()*100.0,
                     'faces': fixed_0['faces'],
-                    'sulc': moving.detach().cpu().numpy() * (13.65+11.5) - 11.5}
+                    'curv': moving.detach().cpu().numpy() * (2.08+2.32) - 2.32}
             write_vtk(moved, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name +'/' + file[0].split('/')[-1][:-3] + 'DL.moved_3.vtk')
             origin = {'vertices': fixed_0['vertices'],
                      'faces': fixed_0['faces'],
                      'deformation': phi_3d.detach().cpu().numpy() * 100.0,
-                     'sulc': moving.detach().cpu().numpy() * (13.65+11.5) - 11.5}
+                     'curv': moving.detach().cpu().numpy() * (2.08+2.32) - 2.32}
             write_vtk(origin, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name + '/' + file[0].split('/')[-1][:-3] + 'DL.origin_3.vtk')
             
         
-    return mae_0, smooth_0, mae_1, smooth_1, mae_2, smooth_2, phi_consis_01, phi_consis_12, phi_consis_02
+#    return mae_0, smooth_0, mae_1, smooth_1, mae_2, smooth_2, phi_consis_01, phi_consis_12, phi_consis_02
 
+test(val_dataloader) 
+test(train_dataloader) 
 
-train_mae_0, train_smooth_0, train_mae_1, train_smooth_1, train_mae_2, train_smooth_2, train_phi_consis_01, train_phi_consis_12, train_phi_consis_02 = test(train_dataloader) 
-val_mae_0, val_smooth_0, val_mae_1, val_smooth_1, val_mae_2, val_smooth_2, test_phi_consis_01, test_phi_consis_12, test_phi_consis_02 = test(val_dataloader) 
-
-print("train_mae_0: mean: {:.4}, std: {:.4}".format(train_mae_0.mean().item(), train_mae_0.std().item()))
-print("train_mae_1: mean: {:.4}, std: {:.4}".format(train_mae_1.mean().item(), train_mae_1.std().item()))
-print("train_mae_2: mean: {:.4}, std: {:.4}".format(train_mae_2.mean().item(), train_mae_2.std().item()))
-
-print("val_mae_0: mean: {:.4}, std: {:.4}".format(val_mae_0.mean().item(), val_mae_0.std().item()))
-print("val_mae_1: mean: {:.4}, std: {:.4}".format(val_mae_1.mean().item(), val_mae_1.std().item()))
-print("val_mae_2: mean: {:.4}, std: {:.4}".format(val_mae_2.mean().item(), val_mae_2.std().item()))
-
-print("train_smooth_0: mean: {:.4}, std: {:.4}".format(train_smooth_0.mean().item(), train_smooth_0.std().item()))
-print("train_smooth_1: mean: {:.4}, std: {:.4}".format(train_smooth_1.mean().item(), train_smooth_1.std().item()))
-print("train_smooth_2: mean: {:.4}, std: {:.4}".format(train_smooth_2.mean().item(), train_smooth_2.std().item()))
-
-print("val_smooth_0: mean: {:.4}, std: {:.4}".format(val_smooth_0.mean().item(), val_smooth_0.std().item()))
-print("val_smooth_1: mean: {:.4}, std: {:.4}".format(val_smooth_1.mean().item(), val_smooth_1.std().item()))
-print("val_smooth_2: mean: {:.4}, std: {:.4}".format(val_smooth_2.mean().item(), val_smooth_2.std().item()))
-
-print("train_phi_consis_01: mean: {:.4}, std: {:.4}".format(train_phi_consis_01.mean().item(), train_phi_consis_01.std().item()))
-print("train_phi_consis_12: mean: {:.4}, std: {:.4}".format(train_phi_consis_12.mean().item(), train_phi_consis_12.std().item()))
-print("train_phi_consis_02: mean: {:.4}, std: {:.4}".format(train_phi_consis_02.mean().item(), train_phi_consis_02.std().item()))
-
-print("test_phi_consis_01: mean: {:.4}, std: {:.4}".format(test_phi_consis_01.mean().item(), test_phi_consis_01.std().item()))
-print("test_phi_consis_12: mean: {:.4}, std: {:.4}".format(test_phi_consis_12.mean().item(), test_phi_consis_12.std().item()))
-print("test_phi_consis_02: mean: {:.4}, std: {:.4}".format(test_phi_consis_02.mean().item(), test_phi_consis_02.std().item()))
+#train_mae_0, train_smooth_0, train_mae_1, train_smooth_1, train_mae_2, train_smooth_2, train_phi_consis_01, train_phi_consis_12, train_phi_consis_02 = test(train_dataloader) 
+#val_mae_0, val_smooth_0, val_mae_1, val_smooth_1, val_mae_2, val_smooth_2, test_phi_consis_01, test_phi_consis_12, test_phi_consis_02 = test(val_dataloader) 
+#
+#print("train_mae_0: mean: {:.4}, std: {:.4}".format(train_mae_0.mean().item(), train_mae_0.std().item()))
+#print("train_mae_1: mean: {:.4}, std: {:.4}".format(train_mae_1.mean().item(), train_mae_1.std().item()))
+#print("train_mae_2: mean: {:.4}, std: {:.4}".format(train_mae_2.mean().item(), train_mae_2.std().item()))
+#
+#print("val_mae_0: mean: {:.4}, std: {:.4}".format(val_mae_0.mean().item(), val_mae_0.std().item()))
+#print("val_mae_1: mean: {:.4}, std: {:.4}".format(val_mae_1.mean().item(), val_mae_1.std().item()))
+#print("val_mae_2: mean: {:.4}, std: {:.4}".format(val_mae_2.mean().item(), val_mae_2.std().item()))
+#
+#print("train_smooth_0: mean: {:.4}, std: {:.4}".format(train_smooth_0.mean().item(), train_smooth_0.std().item()))
+#print("train_smooth_1: mean: {:.4}, std: {:.4}".format(train_smooth_1.mean().item(), train_smooth_1.std().item()))
+#print("train_smooth_2: mean: {:.4}, std: {:.4}".format(train_smooth_2.mean().item(), train_smooth_2.std().item()))
+#
+#print("val_smooth_0: mean: {:.4}, std: {:.4}".format(val_smooth_0.mean().item(), val_smooth_0.std().item()))
+#print("val_smooth_1: mean: {:.4}, std: {:.4}".format(val_smooth_1.mean().item(), val_smooth_1.std().item()))
+#print("val_smooth_2: mean: {:.4}, std: {:.4}".format(val_smooth_2.mean().item(), val_smooth_2.std().item()))
+#
+#print("train_phi_consis_01: mean: {:.4}, std: {:.4}".format(train_phi_consis_01.mean().item(), train_phi_consis_01.std().item()))
+#print("train_phi_consis_12: mean: {:.4}, std: {:.4}".format(train_phi_consis_12.mean().item(), train_phi_consis_12.std().item()))
+#print("train_phi_consis_02: mean: {:.4}, std: {:.4}".format(train_phi_consis_02.mean().item(), train_phi_consis_02.std().item()))
+#
+#print("test_phi_consis_01: mean: {:.4}, std: {:.4}".format(test_phi_consis_01.mean().item(), test_phi_consis_01.std().item()))
+#print("test_phi_consis_12: mean: {:.4}, std: {:.4}".format(test_phi_consis_12.mean().item(), test_phi_consis_12.std().item()))
+#print("test_phi_consis_02: mean: {:.4}, std: {:.4}".format(test_phi_consis_02.mean().item(), test_phi_consis_02.std().item()))

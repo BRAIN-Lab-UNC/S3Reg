@@ -9,7 +9,7 @@ Created on Wed Nov 20 09:17:52 2019
 import numpy as np
 import pyvista
 import copy
-
+from sklearn.neighbors import KDTree
 
 def read_vtk(in_file):
     """
@@ -83,7 +83,25 @@ def remove_field(data, *fields):
     return data
 
 
-
+def resample_label(vertices_fix, vertices_inter, label):
+    """
+    Resample label using nearest neighbor on sphere
+    
+    vertices_fix: N*3 numpy array, original sphere
+    vertices_inter: M*3 numpy array, the sphere to be interpolated
+    label: [N, ?], numpy array, the label on orignal sphere
+    """
+    assert len(vertices_fix) == len(label), "length of label should be consistent with the vertices on orginal sphere."
+    if len(label.shape) == 1:
+        label = label[:,np.newaxis]
+    
+    tree = KDTree(vertices_fix, leaf_size=10)  # build kdtree
+    label_inter = np.zeros((len(vertices_inter), label.shape[1])).astype(np.int32)
+    for i in range(len(vertices_inter)):
+        _, nearest_vertex = tree.query(vertices_inter[i,:][np.newaxis,:], k=1)
+        label_inter[i] = label[nearest_vertex]
+          
+    return label_inter
 
         
 #import matplotlib.pyplot as plt

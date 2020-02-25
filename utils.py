@@ -97,30 +97,34 @@ def compute_weight():
     return num
 
 
-def get_par_fs_to_36():
-    """ Preprocessing for parcellatiion label """
-    file = '/media/fenqiang/DATA/unc/Data/NITRC/data/left/train/MNBCP107842_809.lh.SphereSurf.Orig.Resample.vtk'
-    data = read_vtk(file)
-    par_fs = data['par_fs']
-    par_fs_label = np.sort(np.unique(par_fs))
-    par_dic = {}
-    for i in range(len(par_fs_label)):
-        par_dic[par_fs_label[i]] = i
-    return par_dic
-
-
 def get_par_36_to_fs_vec():
     """ Preprocessing for parcellatiion label """
-    file = '/media/fenqiang/DATA/unc/Data/NITRC/data/left/train/MNBCP107842_809.lh.SphereSurf.Orig.Resample.vtk'
-    data = read_vtk(file)
-    par_fs = data['par_fs']
-    par_fs_vec = data['par_fs_vec']
-    par_fs_to_36 = get_par_fs_to_36()
-    par_36_to_fs = dict(zip(par_fs_to_36.values(), par_fs_to_36.keys()))
-    par_36_to_fs_vec = {}
-    for i in range(len(par_fs_to_36)):
-        par_36_to_fs_vec[i] = par_fs_vec[np.where(par_fs == par_36_to_fs[i])[0][0]]
-    return par_36_to_fs_vec
+    a = sio.loadmat('/media/fenqiang/DATA/unc/Data/Template/par_FS_to_par_vec.mat')
+    a = a['pa']
+    return a[:,0:3]
+
+
+def get_par_35_to_fs_vec():
+    """ Preprocessing for parcellatiion label """
+    
+    label_36_to_35 = []
+    with open('/media/fenqiang/DATA/unc/Data/Template/ROI_36_TO_NAMIC35.txt', "r") as f:
+        for x in f:
+            label_36_to_35.append(int(x.split()[-1]))
+    label_36_to_35 = np.asarray(label_36_to_35)
+    
+    label_36_to_vec = []
+    with open('/media/fenqiang/DATA/unc/Data/Template/FScolortable.txt') as f:
+        data=f.readlines()  #逐行读取txt并存成list。每行是list的一个元素，数据类型为str
+        for i in range(len(data)):
+            for j in range(len(list(data[0].split()))):   #len(list(data[0].split()))为数据列数
+                label_36_to_vec.append(int(data[i].split()[j]))
+    label_36_to_vec = np.asarray(label_36_to_vec)
+    label_36_to_vec = np.reshape(label_36_to_vec,(36, 5))
+    label_36_to_vec =  label_36_to_vec[:,1:4]
+    
+    return label_36_to_vec[label_36_to_35-1]
+
 
 
 def get_orthonormal_vectors(n_ver, rotated=0):

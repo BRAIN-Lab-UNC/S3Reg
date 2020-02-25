@@ -596,3 +596,92 @@ for file in files:
     data = np.concatenate((data['curv'][:,np.newaxis], data['sulc'][:,np.newaxis]), axis=1)
     np.save(file.replace('.vtk','.npy'), data)
     
+    
+    
+####################################################################
+""" save new atlas's lh.curv lh.sulc for SD registration """
+surf = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.163842.rotated_0.vtk')
+sulc = surf['sulc']
+curv = surf['curv']
+np.savetxt('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/freesurfer_format/lh.sulc.txt', sulc)
+np.savetxt('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/freesurfer_format/lh.curv.txt', curv)
+
+
+####################################################################
+""" Resample label and write it into the Deep Learning registered sphere on NAMIC dataset """
+
+from utils import get_par_35_to_fs_vec
+from utils_vtk import resample_label
+
+files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/SphericalMappingWithNewCurvSulc/DL_reg/*_lh.SphereSurf.Resampled160K.moved.vtk'))
+for i in range(len(files)):
+    deformed_ver = read_vtk(files[i])
+    deformed_ver = deformed_ver['vertices']
+    orig_lbl = read_vtk('/media/fenqiang/DATA/unc/Data/registration/NAMIC/SphericalMappingWithNewCurvSulc/DL_reg/' + files[i].split('/')[-1].split('.')[0] + '.SphereSurf.Resampled160K.vtk')
+    orig_lbl = orig_lbl['par_1_to_35']
+    resampled_surf = read_vtk('/media/fenqiang/DATA/unc/Data/registration/NAMIC/SphericalMappingWithNewCurvSulc/DL_reg/' + files[i].split('/')[-1].split('.')[0] + '.SphereSurf.Resampled160K.moved.resampled.163842.vtk')
+    resampled_lbl = resample_label(deformed_ver, resampled_surf['vertices'], orig_lbl)
+    resampled_surf['par_1_to_35'] = resampled_lbl
+    
+    lbl_35_to_vec = get_par_35_to_fs_vec()
+    resampled_surf['par_vec'] = lbl_35_to_vec[resampled_lbl-1]
+
+    write_vtk(resampled_surf, '/media/fenqiang/DATA/unc/Data/registration/NAMIC/SphericalMappingWithNewCurvSulc/DL_reg/' + files[i].split('/')[-1].split('.')[0] + '.SphereSurf.Resampled160K.moved.resampled.163842.vtk')
+    
+    
+    
+####################################################################
+""" compare old bcp data for training nitrc model and new bcp data for registration task, for copying the par_fs in old data to new data """
+
+files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/data/preprocessed_npy/*/*.lh.SphereSurf.Orig.sphere.resampled.163842.vtk'))
+files = [x for x in files if float(x.split('/')[-1].split('_')[1].split('.')[0]) >=450 and float(x.split('/')[-1].split('_')[1].split('.')[0]) <= 630]
+
+for i in range(len(files)):
+    surf1 = read_vtk(files[i])
+    
+    if os.path.exists('/media/fenqiang/DATA/unc/Data/NITRC/data/left/train/'+ files[i].split('/')[9] +'.lh.SphereSurf.Orig.Resample.vtk'):
+        surf2 = read_vtk('/media/fenqiang/DATA/unc/Data/NITRC/data/left/train/'+ files[i].split('/')[9] +'.lh.SphereSurf.Orig.Resample.vtk')
+        surf1['par_vec'] = surf2['par_fs_vec']
+        write_vtk(surf1, files[i])
+    
+
+
+####################################################################
+""" Resample label and write it into the Deep Learning registered sphere on BCP dataset """
+
+from utils_vtk import resample_label
+
+files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/data/preprocessed_npy/*/*.lh.SphereSurf.Orig.sphere.resampled.163842.moved.vtk'))
+for i in range(len(files)):
+    
+    deformed_ver = read_vtk(files[i])
+    deformed_ver = deformed_ver['vertices']
+    orig_lbl_vec = read_vtk(files[i].replace('.moved.vtk', '.vtk'))
+    
+    if 'par_vec' in orig_lbl_vec.keys():
+        orig_lbl_vec = orig_lbl_vec['par_vec']
+        
+        resampled_surf = read_vtk(files[i].replace('.moved.vtk','.moved.resampled.163842.vtk'))
+        resampled_lbl = resample_label(deformed_ver, resampled_surf['vertices'], orig_lbl_vec)
+        resampled_surf['par_vec'] = resampled_lbl
+        
+        write_vtk(resampled_surf, files[i].replace('.moved.vtk','.moved.resampled.163842.vtk'))
+        
+    
+####################################################################
+""" Interpolate par_fs from original resampled surface to original surface """
+
+files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/data/preprocessed_npy/*/*.lh.SphereSurf.Orig.sphere.resampled.163842.vtk'))
+files = [x for x in files if float(x.split('/')[-1].split('_')[1].split('.')[0]) >=450 and float(x.split('/')[-1].split('_')[1].split('.')[0]) <= 630]
+
+for i in range(len(files)):
+    surf1 = read_vtk(files[i])
+    
+    if 'par_vec' in surf1.keys():
+        orig_surf = read_vtk('/media/fenqiang/DATA/unc/Data/registration/data/SD_registration/'+ files[i].split('/')[9] +'/surf/lh.sphere.vtk')
+        orig_surf_lbl = resample_label(surf1['vertices'], orig_surf['vertices'], surf1['par_vec'])
+        SD_reg_surf = read_vtk('/media/fenqiang/DATA/unc/Data/registration/data/SD_registration/'+ files[i].split('/')[9] +'/surf/lh.AlignedToBCPAtlas.sphere.vtk')
+        resampled_surf = read_vtk('/media/fenqiang/DATA/unc/Data/registration/data/SD_registration/'+ files[i].split('/')[9] +'/surf/lh.AlignedToBCPAtlas.sphere.resampled.sucu.vtk')
+        resampled_surf_lbl = resample_label(SD_reg_surf['vertices'], resampled_surf['vertices'], orig_surf_lbl)
+        resampled_surf['par_vec'] = resampled_surf_lbl
+        write_vtk(resampled_surf, '/media/fenqiang/DATA/unc/Data/registration/data/SD_registration/'+ files[i].split('/')[9] +'/surf/lh.AlignedToBCPAtlas.sphere.resampled.sucu.vtk')

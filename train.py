@@ -30,10 +30,10 @@ learning_rate = 0.05
 batch_size = 1
 data_for_test = 0.3
 #weight_corr = 0.3
-weight_smooth = 1.4
+weight_smooth = 0.04
 weight_l2 = 5.0
 weight_l1 = 1.0
-weight_phi_consis = 1.0
+weight_phi_consis = 0.5
 regis_feat = 'curv' # 'sulc' or 'curv'
 
 n_vertex = 40962
@@ -266,8 +266,8 @@ for epoch in range(80):
         writer.add_scalars('Train/loss', {'loss_l1': loss_l1.item(), 'loss_l2': loss_l2.item(), 'loss_smooth': loss_smooth.item(), 'loss_phi_consistency': loss_phi_consistency.item()}, 
                                           epoch*len(train_dataloader) + batch_idx)
     
-    torch.save(model_0.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/regis_"+regis_feat+"_"+str(n_vertex)+"_3d_smooth1p4_phiconsis1_3model_0.mdl")
-    torch.save(model_1.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/regis_"+regis_feat+"_"+str(n_vertex)+"_3d_smooth1p4_phiconsis1_3model_1.mdl")
-    torch.save(model_2.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/regis_"+regis_feat+"_"+str(n_vertex)+"_3d_smooth1p4_phiconsis1_3model_2.mdl")
+    torch.save(model_0.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/regis_"+regis_feat+"_"+str(n_vertex)+"_3d_smooth0p04_phiconsis0p5_3model_0.mdl")
+    torch.save(model_1.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/regis_"+regis_feat+"_"+str(n_vertex)+"_3d_smooth0p04_phiconsis0p5_3model_1.mdl")
+    torch.save(model_2.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/regis_"+regis_feat+"_"+str(n_vertex)+"_3d_smooth0p04_phiconsis0p5_3model_2.mdl")
     
     
