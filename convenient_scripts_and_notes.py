@@ -10,7 +10,7 @@ import numpy as np
 import glob
 import os
 from utils_vtk import read_vtk, remove_field, write_vtk
-from utils import get_orthonormal_vectors, Get_neighs_order
+from utils import get_orthonormal_vectors, get_neighs_order
 import matplotlib.pyplot as plt
 from sklearn.neighbors import KDTree
 import scipy.io as sio 
@@ -523,14 +523,14 @@ def bilinear_inter(tgt, flow):
 #####################################################################
 """ check rotated neighbors orders """ 
 
-def get_neighs_order(order_path):
-    adj_mat_order = sio.loadmat(order_path)
-    adj_mat_order = adj_mat_order['adj_mat_order']
-    neigh_orders = np.zeros((len(adj_mat_order), 7))
-    neigh_orders[:,0:6] = adj_mat_order-1
-    neigh_orders[:,6] = np.arange(len(adj_mat_order))
-    
-    return neigh_orders
+#def get_neighs_order(order_path):
+#    adj_mat_order = sio.loadmat(order_path)
+#    adj_mat_order = adj_mat_order['adj_mat_order']
+#    neigh_orders = np.zeros((len(adj_mat_order), 7))
+#    neigh_orders[:,0:6] = adj_mat_order-1
+#    neigh_orders[:,6] = np.arange(len(adj_mat_order))
+#    
+#    return neigh_orders
 
 ns_vertex = np.array([163842,40962,10242,2562,642,162,42,12])
 for n_vertex in ns_vertex:
@@ -590,11 +590,11 @@ age = [float(x.split('/')[-1].split('_')[1].split('.')[0]) for x in files ]
 
 #####################################################################
 """ Convert vtk to npy """
-files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/presentation/regis_sulc_10242_3d_smooth0p8_phiconsis1_3model_one_step_truncated/training_40962/*.40962.vtk'))
+files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/presentation/regis_sulc_10242_3d_smooth0p8_phiconsis1_3model_one_step_truncated/training_40962_113_truncated/*.lh.SphereSurf.Orig.sphere.resampled.163842.moved.resampled.163842.vtk'))
 for file in files:
     data = read_vtk(file)
-    data = np.concatenate((data['curv'][:,np.newaxis], data['sulc'][:,np.newaxis]), axis=1)
-    np.save(file.replace('.vtk','.npy'), data)
+    data = np.concatenate((data['curv'][0:40962][:,np.newaxis], data['sulc'][0:40962][:,np.newaxis]), axis=1)
+    np.save(file.replace('.163842.vtk','.40962.npy'), data)
     
     
     
@@ -685,3 +685,38 @@ for i in range(len(files)):
         resampled_surf_lbl = resample_label(SD_reg_surf['vertices'], resampled_surf['vertices'], orig_surf_lbl)
         resampled_surf['par_vec'] = resampled_surf_lbl
         write_vtk(resampled_surf, '/media/fenqiang/DATA/unc/Data/registration/data/SD_registration/'+ files[i].split('/')[9] +'/surf/lh.AlignedToBCPAtlas.sphere.resampled.sucu.vtk')
+        
+        
+####################################################################
+""" compute ineterpolated indices and weights for fixed 40962 sphere to alpha beta image """
+i = 1
+shape = [512,512]
+
+sphere_40962 = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.40962.rotated_2.vtk') 
+vertices = sphere_40962['vertices'].astype(np.float64)
+tree = KDTree(vertices, leaf_size=10)  # build kdtree
+faces = sphere_40962['faces']
+faces = faces[:,1:]
+neigh_orders = get_neighs_order('neigh_indices/adj_mat_order_40962_rotated_2.mat')
+
+assert shape[0] == shape[1], "Shape should be square."
+
+inter_indices = np.zeros((shape[0]*shape[1],3)).astype(np.int64)
+inter_weights = np.zeros((shape[0]*shape[1],3))
+
+for p in range(shape[0]):
+    print(p)
+    beta = np.pi/(shape[1]-1)*p
+    for q in range(shape[1]):
+#        print(q)
+        alpha = 2*np.pi/(shape[0]-1)*q
+        x = 100 * np.sin(beta) * np.cos(alpha)
+        y = 100 * np.sin(beta) * np.sin(alpha)
+        z = 100 * np.cos(beta)
+    
+        sphere_loc = np.array([x, y, z])
+        
+        inter_indices[p*shape[0]+q,:], inter_weights[p*shape[0]+q,:] = singleVertexInterpo(sphere_loc, vertices, tree, neigh_orders)
+ 
+np.save('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_indices_40962_2.npy', inter_indices)
+np.save('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_weights_40962_2.npy', inter_weights)

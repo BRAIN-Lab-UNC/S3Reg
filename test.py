@@ -24,10 +24,10 @@ from model import Unet
 
 in_ch = 2   # one for sulc in fixed, one for sulc in moving
 out_ch = 2  # two components for tangent plane deformation vector 
-device = torch.device('cuda:0')
+device = torch.device('cuda:1')
 batch_size = 1
 data_for_test = 0.3
-model_name = 'regis_curv_40962_3d_smooth0p2_phiconsis0p5_3model'
+model_name = 'regis_curv_40962_3d_smooth0p5_phiconsis0p8_corr0p4_3model'
 truncated = False
 regis_feat = 'curv' # 'sulc' or 'curv'
 
@@ -42,7 +42,8 @@ n_vertex = int(model_name.split('_')[2])
 # training 2562, interpolated from 642 for next level training
 #files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/presentation/regis_sulc_642_3d_smooth0p4_phiconsis0p6_3model/training_2562/*sucu_resampled.2562.npy'))
 #files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/presentation/regis_sulc_2562_3d_smooth0p33_phiconsis1_3model/training_10242/*sucu_resampled.10242.npy'))
-files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/presentation/regis_sulc_10242_3d_smooth0p8_phiconsis1_3model_one_step_truncated/training_40962/*.40962.npy'))
+#files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/presentation/regis_sulc_10242_3d_smooth0p8_phiconsis1_3model_one_step_truncated/training_40962/*.40962.npy'))
+files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/presentation/regis_sulc_10242_3d_smooth0p8_phiconsis1_3model_one_step_truncated/training_40962_113_truncated/*.lh.SphereSurf.Orig.sphere.resampled.163842.moved.resampled.40962.npy'))
 
 test_files = [ files[x] for x in range(int(len(files)*data_for_test)) ]
 train_files = [ files[x] for x in range(int(len(files)*data_for_test), len(files)) ]
@@ -252,12 +253,12 @@ def test(dataloader):
             moving_warp_phi_3d_2 = moving_warp_phi_3d_2/(torch.norm(moving_warp_phi_3d_2, dim=1, keepdim=True).repeat(1,3)) # normalize the deformed vertices onto the sphere
             
             """ compute interpolation values on fixed surface """
-            fixed_inter_0 = resampleSphereSurf(fixed_xyz_0.detach().cpu().numpy(), moving_warp_phi_3d_0.detach().cpu().numpy(), fixed_sulc.detach().cpu().numpy())
-            fixed_inter_0 = torch.from_numpy(fixed_inter_0.astype(np.float32)).cuda(device)
-            fixed_inter_1 = resampleSphereSurf(fixed_xyz_1.detach().cpu().numpy(), moving_warp_phi_3d_1.detach().cpu().numpy(), fixed_sulc.detach().cpu().numpy())
-            fixed_inter_1 = torch.from_numpy(fixed_inter_1.astype(np.float32)).cuda(device)
-            fixed_inter_2 = resampleSphereSurf(fixed_xyz_2.detach().cpu().numpy(), moving_warp_phi_3d_2.detach().cpu().numpy(), fixed_sulc.detach().cpu().numpy())
-            fixed_inter_2 = torch.from_numpy(fixed_inter_2.astype(np.float32)).cuda(device)
+#            fixed_inter_0 = resampleSphereSurf(fixed_xyz_0.detach().cpu().numpy(), moving_warp_phi_3d_0.detach().cpu().numpy(), fixed_sulc.detach().cpu().numpy())
+#            fixed_inter_0 = torch.from_numpy(fixed_inter_0.astype(np.float32)).cuda(device)
+#            fixed_inter_1 = resampleSphereSurf(fixed_xyz_1.detach().cpu().numpy(), moving_warp_phi_3d_1.detach().cpu().numpy(), fixed_sulc.detach().cpu().numpy())
+#            fixed_inter_1 = torch.from_numpy(fixed_inter_1.astype(np.float32)).cuda(device)
+#            fixed_inter_2 = resampleSphereSurf(fixed_xyz_2.detach().cpu().numpy(), moving_warp_phi_3d_2.detach().cpu().numpy(), fixed_sulc.detach().cpu().numpy())
+#            fixed_inter_2 = torch.from_numpy(fixed_inter_2.astype(np.float32)).cuda(device)
             
 #            mae_0[batch_idx] = torch.mean(torch.abs(fixed_inter_0 - moving) * z_weight_0.unsqueeze(1))
 #            mae_1[batch_idx] = torch.mean(torch.abs(fixed_inter_1 - moving) * z_weight_1.unsqueeze(1))

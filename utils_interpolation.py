@@ -10,6 +10,7 @@ import itertools
 from sklearn.neighbors import KDTree
 from utils import get_neighs_order
 import math, multiprocessing
+from scipy import interpolate
 
 
 def isATriangle(neigh_orders, face):
@@ -70,6 +71,12 @@ def isInTriangle(vertex, v0, v1, v2):
 
 def singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=7):
     
+    if k > 30:
+        _, top1_near_vertex_index = tree.query(vertex[np.newaxis,:], k=1)
+        inter_weight = np.array([1,0,0])
+        inter_indices = np.array([top1_near_vertex_index[0][0], top1_near_vertex_index[0][0], top1_near_vertex_index[0][0]])
+        return inter_indices, inter_weight
+
     _, top7_near_vertex_index = tree.query(vertex[np.newaxis,:], k=k) 
     candi_faces = []
     for t in itertools.combinations(np.squeeze(top7_near_vertex_index), 3):
@@ -81,7 +88,7 @@ def singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=7):
     else:
         if k > 20:
             print("cannot find candidate faces, top k shoulb be larger, function recursion, current k =", k)
-        return singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=k+3)
+        return singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=k+5)
 
     orig_vertex_1 = vertices[candi_faces[:,0]]
     orig_vertex_2 = vertices[candi_faces[:,1]]
@@ -89,11 +96,13 @@ def singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=7):
     edge_12 = orig_vertex_2 - orig_vertex_1        # edge vectors from vertex 1 to 2
     edge_13 = orig_vertex_3 - orig_vertex_1        # edge vectors from vertex 1 to 3
     faces_normal = np.cross(edge_12, edge_13)    # normals of all the faces
+    tmp = (np.linalg.norm(faces_normal, axis=1) == 0).nonzero()[0]
+    faces_normal[tmp] = orig_vertex_1[tmp]
     faces_normal_norm = faces_normal / np.linalg.norm(faces_normal, axis=1)[:,np.newaxis]
 
     # use formula p(x) = <p1,n>/<x,n> * x in spherical demons paper to calculate the intersection with each faces
-    temp = np.sum(orig_vertex_1 * faces_normal_norm, axis=1) / np.sum(vertex * faces_normal_norm, axis=1)
-    ratio = temp[:, np.newaxis]
+    tmp = np.sum(orig_vertex_1 * faces_normal_norm, axis=1) / np.sum(vertex * faces_normal_norm, axis=1)
+    ratio = tmp[:, np.newaxis]
     P = ratio * vertex  # intersection points
 
     # find the triangle face that the inersection is in, if the intersection
@@ -106,20 +115,25 @@ def singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=7):
     tmp = area_BCP + area_ACP + area_ABP - area_ABC
     index = np.argmin(tmp)
     
-    if tmp[index] > 1e-10: 
-#        print("tmp[index] = ", tmp[index])
-        if isInTriangle(vertex, vertices[candi_faces[index][0]], vertices[candi_faces[index][1]], vertices[candi_faces[index][2]]):
-            assert False, "threshold should be smaller"
-        else:
-            if k > 20:
-                print("candidate faces don't contain the correct one, top k shoulb be larger, function recursion, current k =", k)
-            return singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=k+3)
-    
-    assert abs(ratio[index] - 1) < 0.005, "projected vertex should be near the vertex!" 
+    if tmp[index] > 1e-10:
+        if k > 20:
+            print("candidate faces don't contain the correct one, top k shoulb be larger, function recursion, current k =", k)
+        return singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=k+5)
+
     w = np.array([area_BCP[index], area_ACP[index], area_ABP[index]])
-    inter_weight = w / w.sum()
-    
-    return candi_faces[index], inter_weight
+    if w.sum() == 0:
+        _, top1_near_vertex_index = tree.query(vertex[np.newaxis,:], k=1)
+        inter_weight = np.array([1,0,0])
+        inter_indices = np.array([top1_near_vertex_index[0][0], top1_near_vertex_index[0][0], top1_near_vertex_index[0][0]])
+    else:
+        inter_weight = w / w.sum()
+        inter_indices = candi_faces[index]
+#        print("tmp[index] = ", tmp[index])
+#        if isInTriangle(vertex, vertices[candi_faces[index][0]], vertices[candi_faces[index][1]], vertices[candi_faces[index][2]]):
+#            assert False, "threshold should be smaller"
+#        else:
+        
+    return inter_indices, inter_weight
 
 
 def singleVertexInterpo(vertex, vertices, tree, neigh_orders, feat):
@@ -152,6 +166,9 @@ def singleVertexInterpo(vertex, vertices, tree, neigh_orders, feat):
        
     else:
         inter_indices, inter_weight = singleVertexInterpo_7(vertex, vertices, tree, neigh_orders)
+    
+    
+#    print(inter_weight.shape)
         
     return np.sum(np.multiply(feat[inter_indices], np.repeat(inter_weight[:,np.newaxis], feat.shape[1], axis=1)), axis=0)
 
@@ -218,11 +235,56 @@ def resampleSphereSurf(vertices_fix, vertices_inter, feat, neigh_orders=None):
         
     return np.squeeze(feat_inter)
         
+
+def bilinear_interpolate(im, x, y):
+    x0 = np.floor(x).astype(int)
+    x1 = x0 + 1
+    y0 = np.floor(y).astype(int)
+    y1 = y0 + 1
+
+    x0 = np.clip(x0, 0, im.shape[1]-1);
+    x1 = np.clip(x1, 0, im.shape[1]-1);
+    y0 = np.clip(y0, 0, im.shape[0]-1);
+    y1 = np.clip(y1, 0, im.shape[0]-1);
+
+    Ia = im[ y0, x0 ]
+    Ib = im[ y1, x0 ]
+    Ic = im[ y0, x1 ]
+    Id = im[ y1, x1 ]
+
+    wa = (x1-x) * (y1-y)
+    wb = (x1-x) * (y-y0)
+    wc = (x-x0) * (y1-y)
+    wd = (x-x0) * (y-y0)
+
+    return wa[:,np.newaxis]*Ia + wb[:,np.newaxis]*Ib + wc[:,np.newaxis]*Ic + wd[:,np.newaxis]*Id
+
         
+def bilinearResampleSphereSurf(vertices_inter, feat, bi_inter_40962, radius=1.0):
+    """
+    assume vertices_fix are on the standard icosahedron discretized spheres
+    
+    """
+    inter_indices, inter_weights = bi_inter_40962
+    
+    width = int(np.sqrt(len(inter_indices)))
+    if len(feat.shape) == 1:
+        feat = feat[:,np.newaxis]
         
-        
-        
-        
-        
-        
-        
+    img = np.sum(np.multiply((feat[inter_indices.flatten()]).reshape((inter_indices.shape[0], inter_indices.shape[1], feat.shape[1])), np.repeat(inter_weights[:,:, np.newaxis], feat.shape[1], axis=-1)), axis=1)
+    img = img.reshape((width, width, feat.shape[1]))
+    
+    beta = np.arccos(vertices_inter[:,2]/radius)
+    row = beta/(np.pi/(width-1))
+    tmp = (vertices_inter[:,0] == 0).nonzero()[0]
+    vertices_inter[:,0][tmp] = 1e-10
+    alpha = np.arctan(vertices_inter[:,1]/vertices_inter[:,0])
+    tmp =  (vertices_inter[:,0] < 0).nonzero()[0]
+    alpha[tmp] = np.pi + alpha[tmp]
+    tmp =  np.intersect1d((vertices_inter[:,0] > 0).nonzero()[0], (vertices_inter[:,1] < 0).nonzero()[0])
+    alpha[tmp] = 2*np.pi + alpha[tmp]
+    col = alpha/(2*np.pi/(width-1))
+    
+    feat_inter = bilinear_interpolate(img, col, row)
+    
+    return feat_inter

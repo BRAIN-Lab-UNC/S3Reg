@@ -12,6 +12,18 @@ from sklearn.neighbors import KDTree
 import numpy as np
 import math
 
+from utils import get_orthonormal_vectors
+
+def getEn(n_vertex, device):
+    En_0 = get_orthonormal_vectors(n_vertex, rotated=0)
+    En_0 = torch.from_numpy(En_0.astype(np.float32)).cuda(device)
+    En_1 = get_orthonormal_vectors(n_vertex, rotated=1)
+    En_1 = torch.from_numpy(En_1.astype(np.float32)).cuda(device)
+    En_2 = get_orthonormal_vectors(n_vertex, rotated=2)
+    En_2 = torch.from_numpy(En_2.astype(np.float32)).cuda(device)
+    return En_0, En_1, En_2
+
+
 def isATriangle(neigh_orders, face):
     """
     neigh_orders_163842: int, (N*7) x 1
@@ -44,7 +56,7 @@ def singleVertexInterpo_7(moving_warp_phi_3d_i, moving_warp_phi_3d_i_cpu, tree, 
         candi_faces = np.asarray(candi_faces)
     else:
         print("cannot find candidate faces, top k shoulb be larger, function recursion, current k =", k)
-        return singleVertexInterpo_7(moving_warp_phi_3d_i, moving_warp_phi_3d_i_cpu, tree, fixed_xyz, neigh_orders, k=k+2)
+        return singleVertexInterpo_7(moving_warp_phi_3d_i, moving_warp_phi_3d_i_cpu, tree, fixed_xyz, neigh_orders, k=k+3)
             
     orig_vertex_0 = fixed_xyz[candi_faces[:,0]]
     orig_vertex_1 = fixed_xyz[candi_faces[:,1]]
@@ -64,11 +76,11 @@ def singleVertexInterpo_7(moving_warp_phi_3d_i, moving_warp_phi_3d_i_cpu, tree, 
     area_ABC = torch.norm(faces_normal, 2, dim=1)/2.0
     
     min_area, index = torch.min(area_BCP + area_ACP + area_ABP - area_ABC, 0)
-    assert abs(ratio[index] - 1) < 0.01, "projected vertex should be near the vertex!" 
     if min_area > 1e-08:
         print("top k shoulb be larger, function recursion, current k =", k)
-        return singleVertexInterpo_7(moving_warp_phi_3d_i, moving_warp_phi_3d_i_cpu, tree, fixed_xyz, neigh_orders, k=k+2)
+        return singleVertexInterpo_7(moving_warp_phi_3d_i, moving_warp_phi_3d_i_cpu, tree, fixed_xyz, neigh_orders, k=k+3)
     
+    assert abs(ratio[index] - 1) < 0.01, "projected vertex should be near the vertex!" 
     w = torch.stack((area_BCP[index], area_ACP[index], area_ABP[index]))
     inter_weight = w / w.sum()
     
@@ -110,7 +122,7 @@ def singleVertexInterpo(moving_warp_phi_3d_i, moving_warp_phi_3d_i_cpu, tree, fi
     return torch.mm(inter_weight.unsqueeze(0), fixed_sulc[inter_indices])
 
 
-def resampleSphereSurf(moving_warp_phi_3d, fixed_xyz, fixed_sulc, neigh_orders, device):
+def resampleSphereSurf(fixed_xyz, moving_warp_phi_3d, fixed_sulc, neigh_orders, device):
     """
     Interpolate moving points using fixed points and its feature
     
@@ -135,8 +147,65 @@ def resampleSphereSurf(moving_warp_phi_3d, fixed_xyz, fixed_sulc, neigh_orders, 
         
     return fixed_inter
     
+
+def bilinear_interpolate(im, x, y):
+    """
+    im: 512*512*C
+    """
+    x0 = torch.floor(x)
+    x1 = x0 + 1
+    y0 = torch.floor(y)
+    y1 = y0 + 1
+
+    x0 = torch.clamp(x0, 0, im.shape[1]-1)
+    x1 = torch.clamp(x1, 0, im.shape[1]-1)
+    y0 = torch.clamp(y0, 0, im.shape[0]-1)
+    y1 = torch.clamp(y1, 0, im.shape[0]-1)
+
+    Ia = im[ y0.long(), x0.long() ]
+    Ib = im[ y1.long(), x0.long() ]
+    Ic = im[ y0.long(), x1.long() ]
+    Id = im[ y1.long(), x1.long() ]
+
+    wa = (x1-x) * (y1-y)
+    wb = (x1-x) * (y-y0)
+    wc = (x-x0) * (y1-y)
+    wd = (x-x0) * (y-y0)
+
+    return wa.unsqueeze(1)*Ia + wb.unsqueeze(1)*Ib + wc.unsqueeze(1)*Ic + wd.unsqueeze(1)*Id
+
         
-        
+def bilinearResampleSphereSurf(vertices_inter, img, radius=1.0):
+    """
+    assume vertices_fix are on the standard icosahedron discretized spheres
+    
+    """
+    width = img.shape[0]
+
+    beta = torch.acos(vertices_inter[:,2]/radius)
+    row = beta/(math.pi/(width-1))
+    
+    tmp = (vertices_inter[:,0] == 0).nonzero(as_tuple=True)[0]
+    vertices_inter[:,0][tmp] = 1e-10
+    
+    alpha = torch.zeros_like(beta)
+    
+    tmp1 = np.intersect1d((vertices_inter[:,0] >= 0).nonzero(as_tuple=True)[0].cpu(), (vertices_inter[:,1] >= 0).nonzero(as_tuple=True)[0].cpu())
+    alpha[tmp1] = torch.atan(vertices_inter[tmp1][:,1]/vertices_inter[tmp1][:,0]) 
+    
+    tmp2 = (vertices_inter[:,0] < 0).nonzero(as_tuple=True)[0]
+    alpha[tmp2] = torch.atan(vertices_inter[tmp2][:,1]/vertices_inter[tmp2][:,0]) + math.pi
+    
+    tmp3 = np.intersect1d((vertices_inter[:,0] >= 0).nonzero(as_tuple=True)[0].cpu(), (vertices_inter[:,1] < 0).nonzero(as_tuple=True)[0].cpu())
+    alpha[tmp3] = torch.atan(vertices_inter[tmp3][:,1]/vertices_inter[tmp3][:,0]) + 2*math.pi
+    
+    assert len(tmp1) + len(tmp2) + len(tmp3) == len(vertices_inter)
+    
+    col = alpha/(2*math.pi/(width-1))
+    
+    feat_inter = bilinear_interpolate(img, col, row)
+    
+    return feat_inter 
         
 #    """ multiple processes method: 163842: 9.6s, 40962: 2.8s, 10242: 1.0s, 2562: 0.28s """
 #    pool = torch.multiprocessing.Pool()

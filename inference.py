@@ -12,14 +12,22 @@ import torchvision
 import numpy as np
 import glob
 import argparse
+import math 
 
-from utils_interpolation import resampleSphereSurf
-from utils import Get_neighs_order, get_orthonormal_vectors, get_z_weight, get_vertex_dis
-from utils_vtk import read_vtk, write_vtk
+from utils_interpolation import resampleSphereSurf, bilinearResampleSphereSurf
+from utils import get_orthonormal_vectors, get_z_weight, get_vertex_dis
+from utils_vtk import read_vtk, write_vtk, resample_label
+from utils_torch import getEn
 
 from model import Unet
 import time
 
+
+def get_bi_inter(n_vertex):
+    inter_indices = np.load('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_indices_'+ str(n_vertex) +'.npy')
+    inter_weights = np.load('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_weights_'+ str(n_vertex) +'.npy')
+    
+    return inter_indices, inter_weights
 
 def get_trained_model(n_vertex, device):
     in_ch=2
@@ -30,28 +38,18 @@ def get_trained_model(n_vertex, device):
     
     model_0 = Unet(in_ch=in_ch, out_ch=out_ch, level=level, n_res=n_res, rotated=0)
     model_0.cuda(device)
-    model_0.load_state_dict(torch.load('/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/model/regis_sulc_'+str(n_vertex)+'_0.mdl'))
+    model_0.load_state_dict(torch.load('/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/model/regis_'+str(n_vertex)+'_0.mdl'))
     
     model_1 = Unet(in_ch=in_ch, out_ch=out_ch, level=level, n_res=n_res, rotated=1)
     model_1.cuda(device)
-    model_1.load_state_dict(torch.load('/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/model/regis_sulc_'+str(n_vertex)+'_1.mdl'))
+    model_1.load_state_dict(torch.load('/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/model/regis_'+str(n_vertex)+'_1.mdl'))
     
     model_2 = Unet(in_ch=in_ch, out_ch=out_ch, level=level, n_res=n_res, rotated=2)
     model_2.cuda(device)
-    model_2.load_state_dict(torch.load('/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/model/regis_sulc_'+str(n_vertex)+'_2.mdl'))
+    model_2.load_state_dict(torch.load('/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/model/regis_'+str(n_vertex)+'_2.mdl'))
     
     return model_0, model_1, model_2
     
-
-def getEn(n_vertex, device):
-    En_0 = get_orthonormal_vectors(n_vertex, rotated=0)
-    En_0 = torch.from_numpy(En_0.astype(np.float32)).cuda(device)
-    En_1 = get_orthonormal_vectors(n_vertex, rotated=1)
-    En_1 = torch.from_numpy(En_1.astype(np.float32)).cuda(device)
-    En_2 = get_orthonormal_vectors(n_vertex, rotated=2)
-    En_2 = torch.from_numpy(En_2.astype(np.float32)).cuda(device)
-    return En_0, En_1, En_2
-
 
 def getOverlapIndex(n_vertex, device):
     """
@@ -111,90 +109,39 @@ def getOverlapIndex(n_vertex, device):
     return rot_mat_01, rot_mat_12, rot_mat_02, rot_mat_20, index_double_02, index_double_12, index_double_01, index_triple_computed
 
 
-def inferDeformation(model_0, model_1, model_2, moving, fixed_sulc, device, truncated=False):
+def inferDeformation(model, En, merge_index, moving, fixed_sulc, device, truncated=False, diffe=False, num_composition=3):
     """
     infer the deformation from the 3 model framework
     
-    load  642  3 models:  4628.545522689819 ms
-    get overlap index  642 : 22.965192794799805 ms
-    get En  642 : 9.379148483276367 ms
-    move data to cuda:  0.6093978881835938 ms
-    infer 3 phis  642 : 20.24078369140625 ms
-    truncated  642 : 0.060558319091796875 ms
-    compute 3d phi from 2d phi  642 : 58.59541893005371 ms
-    rotate 3d phi 642 : 0.4603862762451172 ms
-    merge 3 3d phi 642 : 0.7610321044921875 ms
-    load  2562  3 models:  4687.880277633667 ms
-    get overlap index  2562 : 49.8812198638916 ms
-    get En  2562 : 27.04596519470215 ms
-    move data to cuda:  0.5090236663818359 ms
-    infer 3 phis  2562 : 23.22864532470703 ms
-    truncated  2562 : 0.1430511474609375 ms
-    compute 3d phi from 2d phi  2562 : 234.86733436584473 ms
-    rotate 3d phi 2562 : 0.49304962158203125 ms
-    merge 3 3d phi 2562 : 0.8366107940673828 ms
-    load  10242  3 models:  4779.069900512695 ms
-    get overlap index  10242 : 115.13924598693848 ms
-    get En  10242 : 127.32338905334473 ms
-    move data to cuda:  0.3612041473388672 ms
-    infer 3 phis  10242 : 20.565509796142578 ms
-    truncated  10242 : 1.8954277038574219 ms
-    compute 3d phi from 2d phi  10242 : 934.7960948944092 ms
-    rotate 3d phi 10242 : 0.6048679351806641 ms
-    merge 3 3d phi 10242 : 0.9973049163818359 ms
-    load  10242  3 models:  4732.393026351929 ms
-    get overlap index  10242 : 114.3648624420166 ms
-    get En  10242 : 126.28173828125 ms
-    move data to cuda:  0.5986690521240234 ms
-    infer 3 phis  10242 : 29.126405715942383 ms
-    truncated  10242 : 2.161264419555664 ms
-    compute 3d phi from 2d phi  10242 : 934.9527359008789 ms
-    rotate 3d phi 10242 : 0.48804283142089844 ms
-    merge 3 3d phi 10242 : 0.7569789886474609 ms
-    load  10242  3 models:  4764.239311218262 ms
-    get overlap index  10242 : 116.48797988891602 ms
-    get En  10242 : 104.98881340026855 ms
-    move data to cuda:  0.6291866302490234 ms
-    infer 3 phis  10242 : 38.08140754699707 ms
-    truncated  10242 : 2.8259754180908203 ms
-    compute 3d phi from 2d phi  10242 : 927.3874759674072 ms
-    rotate 3d phi 10242 : 0.5834102630615234 ms
-    merge 3 3d phi 10242 : 1.2521743774414062 ms
-    
+    infer 3 phis  642 : 15.1519775390625 ms
+    compute 3d phi from 2d phi  642 : 57.082176208496094 ms
+    rotate 3d phi 642 : 0.19431114196777344 ms
+    merge 3 3d phi 642 : 0.9906291961669922 ms
+    infer 3 phis  2562 : 17.673492431640625 ms
+    compute 3d phi from 2d phi  2562 : 230.2684783935547 ms
+    rotate 3d phi 2562 : 0.5338191986083984 ms
+    merge 3 3d phi 2562 : 0.8721351623535156 ms
+    infer 3 phis  10242 : 37.55640983581543 ms
+    truncated  10242 : 2.7837753295898438 ms
+    compute 3d phi from 2d phi  10242 : 900.9714126586914 ms
+    rotate 3d phi 10242 : 0.4401206970214844 ms
+    merge 3 3d phi 10242 : 0.8537769317626953 ms
     
     """
+    assert False in [truncated, diffe], "Need SD or MSM implementation for diffeomorphic, not both!"
+    
     n_vertex = len(moving) 
     
-    t0 = time.time()
-
-    
-
+    model_0, model_1, model_2 = model
     model_0.eval()
     model_1.eval()
     model_2.eval()
     
-    t1 = time.time()
-    print("load ", n_vertex, " 3 models: ", (t1-t0)*1000, "ms")
-    
-    
-    rot_mat_01, rot_mat_12, rot_mat_02, rot_mat_20, index_double_02, index_double_12, index_double_01, index_triple_computed = getOverlapIndex(n_vertex, device)
-    
-    t2 = time.time()
-    print("get overlap index ", n_vertex, ":", (t2-t1)*1000, "ms")
-    
-    
-    En_0, En_1, En_2 = getEn(n_vertex, device)
-    
-    t3 = time.time()
-    print("get En ", n_vertex, ":", (t3-t2)*1000, "ms")
-    
+    rot_mat_01, rot_mat_12, rot_mat_02, rot_mat_20, index_double_02, index_double_12, index_double_01, index_triple_computed = merge_index
+    En_0, En_1, En_2 = En
     
     moving = torch.from_numpy(moving.astype(np.float32)).cuda(device)
     fixed_sulc = torch.from_numpy(fixed_sulc.astype(np.float32)).cuda(device)
-    
-    t4 = time.time()
-    print("move data to cuda: ", (t4-t3)*1000, "ms")
-    
     
     with torch.no_grad():
         data = torch.cat((moving.unsqueeze(1), fixed_sulc.unsqueeze(1)), 1)
@@ -204,11 +151,6 @@ def inferDeformation(model_0, model_1, model_2, moving, fixed_sulc, device, trun
         phi_2d_1 = model_1(data)
         phi_2d_2 = model_2(data)
         
-        
-        t5 = time.time()
-        print("infer 3 phis ", n_vertex, ":",  (t5-t4)*1000, "ms")
-    
-
         if truncated:
             max_disp = get_vertex_dis(n_vertex)/100.0*0.45
             tmp = torch.norm(phi_2d_0, dim=1) > max_disp
@@ -218,11 +160,12 @@ def inferDeformation(model_0, model_1, model_2, moving, fixed_sulc, device, trun
             tmp = torch.norm(phi_2d_2, dim=1) > max_disp
             phi_2d_2[tmp] = phi_2d_2[tmp] / (torch.norm(phi_2d_2[tmp], dim=1, keepdim=True).repeat(1,2)) * max_disp
             
+        # diffeomorphic implementation, divied by 2^n_steps
+        if diffe:
+            phi_2d_0 = phi_2d_0/math.pow(2,num_composition)
+            phi_2d_1 = phi_2d_1/math.pow(2,num_composition)
+            phi_2d_2 = phi_2d_2/math.pow(2,num_composition)
             
-        t6 = time.time()
-        print("truncated ", n_vertex, ":",  (t6-t5)*1000, "ms")
-    
-        
         phi_3d_0 = torch.zeros(3, len(En_0)).cuda(device)
         for j in range(len(En_0)):
             phi_3d_0[:,j] = torch.squeeze(torch.mm(En_0[j,:,:], torch.unsqueeze(phi_2d_0[j,:],1)))
@@ -232,12 +175,6 @@ def inferDeformation(model_0, model_1, model_2, moving, fixed_sulc, device, trun
         phi_3d_2 = torch.zeros(3, len(En_2)).cuda(device)
         for j in range(len(En_2)):
             phi_3d_2[:,j] = torch.squeeze(torch.mm(En_2[j,:,:], torch.unsqueeze(phi_2d_2[j,:],1)))
-    
-    
-        t7 = time.time()
-        print("compute 3d phi from 2d phi ", n_vertex, ":",  (t7-t6)*1000, "ms")
-    
-    
     
         phi_3d_0_to_1 = torch.mm(rot_mat_01, phi_3d_0)
         phi_3d_0_to_1 = torch.transpose(phi_3d_0_to_1, 0, 1)
@@ -250,11 +187,6 @@ def inferDeformation(model_0, model_1, model_2, moving, fixed_sulc, device, trun
         phi_3d_1 = torch.transpose(phi_3d_1, 0, 1)
         phi_3d_2 = torch.transpose(phi_3d_2, 0, 1)
         
-        
-        t8 = time.time()
-        print("rotate 3d phi", n_vertex, ":",  (t8-t7)*1000, "ms")
-    
-        
         phi_3d = torch.zeros(len(En_0), 3).cuda(device)
         phi_3d[index_double_02] = (phi_3d_0_to_2[index_double_02] + phi_3d_2[index_double_02])/2.0
         phi_3d[index_double_12] = (phi_3d_1_to_2[index_double_12] + phi_3d_2[index_double_12])/2.0
@@ -262,60 +194,96 @@ def inferDeformation(model_0, model_1, model_2, moving, fixed_sulc, device, trun
         phi_3d[index_double_01] = torch.transpose(torch.mm(rot_mat_12, torch.transpose(tmp,0,1)), 0, 1)
         phi_3d[index_triple_computed] = (phi_3d_1_to_2[index_triple_computed] + phi_3d_2[index_triple_computed] + phi_3d_0_to_2[index_triple_computed])/3.0
         phi_3d = torch.transpose(torch.mm(rot_mat_20, torch.transpose(phi_3d,0,1)),0,1)
-        
-        
-        t9 = time.time()
-        print("merge 3 3d phi", n_vertex, ":",  (t9-t8)*1000, "ms")
-    
+
         return phi_3d.detach().cpu().numpy()
             
         
+def diffeomorp(phi, fixed_xyz, diffe_iter, bi=False, bi_inter=None):
+    warped_vertices = fixed_xyz + phi
+    warped_vertices = warped_vertices/np.linalg.norm(warped_vertices, axis=1)[:,np.newaxis]
+    
+    # compute exp
+    for i in range(diffe_iter):
+        if bi == True:
+            warped_vertices = bilinearResampleSphereSurf(fixed_xyz, warped_vertices, warped_vertices, bi_inter)
+        else:
+            warped_vertices = resampleSphereSurf(fixed_xyz, warped_vertices, warped_vertices)
+        
+        warped_vertices = warped_vertices/np.linalg.norm(warped_vertices, axis=1)[:,np.newaxis]
+    
+    # get defrom from warped_vertices 
+    tmp = 1.0/np.sum(np.multiply(fixed_xyz, warped_vertices), 1)[:,np.newaxis] * warped_vertices
 
-def inferTotalDeform(model_0, model_1, model_2, n_vertex, total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, truncated=False):
+    return tmp - fixed_xyz
+
+    
+def projectOntoTangentPlane(curr_vertices, phi):
+    # First find unit normal vectors of curr_vertices
+    unit_normal = curr_vertices/np.linalg.norm(curr_vertices, axis=1)[:,np.newaxis]
+    
+    #Now, find projection of phi onto normal vectors
+    projected_phi = unit_normal * np.sum(np.multiply(curr_vertices, phi), 1)[:,np.newaxis]
+    phi = phi - projected_phi
+
+    return phi
+
+
+def inferTotalDeform(model, En, merge_index, n_vertex, total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, truncated=False, diffe=False, diffe_iter=2, bi=False, bi_inter=None):
     if len(total_deform) < n_vertex:
         total_deform = resampleSphereSurf(fixed_xyz[0:len(total_deform),:], fixed_xyz[0:n_vertex,:], total_deform)
+        total_deform = projectOntoTangentPlane(fixed_xyz[0:n_vertex,:], total_deform)
+        
     moving_warp_phi = fixed_xyz[0:n_vertex,:] + total_deform
     moving_warp_phi = moving_warp_phi/np.linalg.norm(moving_warp_phi, axis=1)[:,np.newaxis]
     moving_warp_phi_resample = resampleSphereSurf(moving_warp_phi, fixed_xyz[0:n_vertex,:], moving_sulc[0:n_vertex])
-    phi = inferDeformation(model_0, model_1, model_2, moving_warp_phi_resample, fixed_sulc[0:n_vertex], device, truncated=truncated)
+    phi = inferDeformation(model, En, merge_index, moving_warp_phi_resample, fixed_sulc[0:n_vertex], device, truncated=truncated, diffe=diffe)
+    
+    if diffe == True:
+        phi = diffeomorp(phi, fixed_xyz[0:n_vertex,:], diffe_iter, bi=bi, bi_inter=bi_inter)
+    
     phi_reinterpo = resampleSphereSurf(fixed_xyz[0:n_vertex,:], moving_warp_phi, phi)
+    phi_reinterpo = projectOntoTangentPlane(moving_warp_phi, phi_reinterpo)
+    
     total_deform = total_deform + phi_reinterpo
+    total_deform = projectOntoTangentPlane(fixed_xyz[0:n_vertex,:], total_deform)
     
     return total_deform
 
 
+#file_name = '/media/fenqiang/DATA/unc/Data/registration/data/preprocessed_npy/MNBCP000178_494/MNBCP000178_494.lh.SphereSurf.Orig.sphere.resampled.163842.vtk'
+#atlas_name = '/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.163842.rotated_0.vtk'
 
-file_name = '/media/fenqiang/DATA/unc/Data/registration/data/preprocessed_npy/MNBCP000178_494/MNBCP000178_494.lh.SphereSurf.Orig.sphere.resampled.163842.vtk'
-atlas_name = '/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.163842.rotated_0.vtk'
+
+device = torch.device('cuda:1')
+
+model_642 = get_trained_model(642, device)
+model_2562 = get_trained_model(2562, device)
+model_10242 = get_trained_model(10242, device)
+model_40962 = get_trained_model(40962, device)
+
+En_642 = getEn(642, device)
+En_2562 = getEn(2562, device)
+En_10242 = getEn(10242, device)
+En_40962 = getEn(40962, device)
+
+merge_index_642 = getOverlapIndex(642, device)
+merge_index_2562 = getOverlapIndex(2562, device)
+merge_index_10242 = getOverlapIndex(10242, device)
+merge_index_40962 = getOverlapIndex(40962, device)
+
+bi_inter_40962 = get_bi_inter(40962)
 
 
 def registerToAtlas(file_name, atlas_name):
     """
+    load model:  15757.77006149292 ms
     read surface:  572.8440284729004 ms
     read atlas:  486.020565032959 ms
-    infer on 642 :  4811.462163925171 ms
-    resample to 2562:  1799.1602420806885 ms
-    infer on 2562 :  5178.599834442139 ms
-    get total deform on 2562:  883.124589920044 ms
-    resample to 10242:  3291.548728942871 ms
-    infer on 10242 :  6145.487070083618 ms
-    get total deform on 10242:  1297.8949546813965 ms
-    resample infer get total deform on 10242 again:  8875.661134719849 ms
-    resample infer get total deform on 10242 again:  9059.664249420166 ms
-    final resample to 163842:  14184.407472610474 ms
     
-    total: 53s
+    total: 30s
     """
     
-    device = torch.device('cuda:0')
-    model_0_642, model_1_642, model_2_642 = get_trained_model(642, device)
-    model_0_2562, model_1_2562, model_2_2562 = get_trained_model(2562, device)
-    model_0_10242, model_1_10242, model_2_10242 = get_trained_model(10242, device)
-#    model_0_40962, model_1_40962, model_2_40962 = get_trained_model(40962, device)
-        
-    
     t0 = time.time()
-    
     
     surf_163842 = read_vtk(file_name)
     moving_sulc = surf_163842['sulc']
@@ -331,52 +299,53 @@ def registerToAtlas(file_name, atlas_name):
     fixed_xyz = atlas['vertices']/100.0
     
     # coarse registration on 642 vertices
-    total_deform = inferDeformation( model_0_642, model_1_642, model_2_642, moving_sulc[0:642], fixed_sulc[0:642], device)
+    total_deform = inferDeformation(model_642, En_642, merge_index_642, moving_sulc[0:642], fixed_sulc[0:642], device)
    
     # reigs on 2562 vertices
-    total_deform = inferTotalDeform(model_0_2562, model_1_2562, model_2_2562, 2562, total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, truncated=False)
+    total_deform = inferTotalDeform(model_2562, En_2562, merge_index_2562, 2562, total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, truncated=False)
     
     # reigs on 10242 vertices
-    total_deform = inferTotalDeform(model_0_10242, model_1_10242, model_2_10242, 10242, total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, truncated=True)
+    total_deform = inferTotalDeform(model_10242, En_10242, merge_index_10242, 10242, total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, truncated=True)
+    total_deform = inferTotalDeform(model_10242, En_10242, merge_index_10242, 10242, total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, truncated=True)
+#    total_deform = inferTotalDeform(model_10242, En_10242, merge_index_10242, 10242, total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, truncated=True)
     
-    # reigs on 10242 vertices again
-    total_deform = inferTotalDeform(model_0_10242, model_1_10242, model_2_10242, 10242, total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, truncated=True)
+    # reigs on 40962 vertices
+    total_deform = inferTotalDeform(model_40962, En_40962, merge_index_40962, 40962, total_deform, fixed_xyz, moving_curv, fixed_curv, device, truncated=False, diffe=True, diffe_iter=3, bi=True, bi_inter=bi_inter_40962)
     
-    # reigs on 10242 vertices  
-    total_deform = inferTotalDeform(model_0_10242, model_1_10242, model_2_10242, 10242, total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, truncated=True)
-    
-
-    total_deform = resampleSphereSurf(fixed_xyz[0:10242,:], fixed_xyz, total_deform)
+    total_deform = resampleSphereSurf(fixed_xyz[0:40962,:], fixed_xyz, total_deform)
+    total_deform = projectOntoTangentPlane(fixed_xyz, total_deform)
     moving_warp_phi_163842 = fixed_xyz + total_deform
     moving_warp_phi_163842 = moving_warp_phi_163842/np.linalg.norm(moving_warp_phi_163842, axis=1)[:,np.newaxis]
-    
-    t1 = time.time()
     
     moved = {'vertices': moving_warp_phi_163842 * 100.0,
              'faces': surf_163842['faces'],
              'curv': moving_curv * (2.08+2.32) - 2.32,
              'sulc': moving_sulc * (13.65+11.5) - 11.5}
+    if 'par_vec' in surf_163842.keys():
+        moved['par_vec'] = surf_163842['par_vec']
     write_vtk(moved, file_name[:-3]+'moved.vtk')
-    origin = {'vertices': surf_163842['vertices'],
-              'faces': surf_163842['faces'],
-              'deformation': total_deform * 100.0,
-              'curv': moving_curv * (2.08+2.32) - 2.32,
-              'sulc': moving_sulc * (13.65+11.5) - 11.5}
-    write_vtk(origin, file_name[:-3]+'deform.vtk')
+    
+    t1 = time.time()
+    
+    surf_163842['deformation'] = total_deform * 100.0
+    write_vtk(surf_163842, file_name[:-3]+'deform.vtk')
      
     moved_resample_sulc_curv = resampleSphereSurf(moving_warp_phi_163842, fixed_xyz, np.hstack((moved['sulc'][:,np.newaxis], moved['curv'][:,np.newaxis])))
     moved_resample = {'vertices': surf_163842['vertices'],
                       'faces': surf_163842['faces'],
                       'sulc': moved_resample_sulc_curv[:,0],
                       'curv': moved_resample_sulc_curv[:,1]}
+    if 'par_vec' in surf_163842.keys():
+        resample_lbl = resample_label(moving_warp_phi_163842, fixed_xyz, surf_163842['par_vec'])
+        moved_resample['par_vec'] = resample_lbl
     write_vtk(moved_resample, file_name[:-3]+'moved.resampled.163842.vtk')
     
     return (t1-t0)
     
 
-if __name__ == "__main__":    
-    parser = argparse.ArgumentParser(description='Rigister the surface to the atlas',
-                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+#if __name__ == "__main__":    
+#    parser = argparse.ArgumentParser(description='Rigister the surface to the atlas',
+#                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 #    parser.add_argument('--level', '-l', default='7',
 #                        choices=['7', '8'],
 #                        help="Specify the level of the surfaces. Generally, level 7 spherical surface is with 40962 vertices, 8 is with 163842 vertices.")
@@ -390,12 +359,15 @@ if __name__ == "__main__":
 #    parser.add_argument('--out_folder', '-out_folder', default='[in_folder]', metavar='OUT_FOLDER',
 #                        help='folder path for ouput surface. Accept output or out_folder.')
 
-  
-    files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/SphericalMappingWithNewCurvSulc/DL_reg/*_lh.SphereSurf.Resampled160K.vtk'))
-#    files = [x for x in files if float(x.split('/')[-1].split('_')[1].split('.')[0]) >=450 and float(x.split('/')[-1].split('_')[1].split('.')[0]) <= 630]
-    cost = np.zeros(len(files))
-    for i in range(len(files)):
-        print(i)
-        file = files[i]
-        cost[i] = registerToAtlas(file, '/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.163842.rotated_0.vtk')
-        print(cost[i], "s")
+
+#files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/SphericalMappingWithNewCurvSulc/DL_reg/*_lh.SphereSurf.Resampled160K.vtk'))
+
+files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/data/preprocessed_npy/*/*.lh.SphereSurf.Orig.sphere.resampled.163842.vtk'))
+files = [x for x in files if float(x.split('/')[-1].split('_')[1].split('.')[0]) >=450 and float(x.split('/')[-1].split('_')[1].split('.')[0]) <= 630]
+
+cost = np.zeros(len(files))
+for i in range(len(files)):
+    print(i)
+    file = files[i]
+    cost[i] = registerToAtlas(file, '/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.163842.rotated_0.vtk')
+    print(cost[i], "s")
