@@ -16,11 +16,16 @@ from utils import get_orthonormal_vectors
 
 def getEn(n_vertex, device):
     En_0 = get_orthonormal_vectors(n_vertex, rotated=0)
-    En_0 = torch.from_numpy(En_0.astype(np.float32)).cuda(device)
+    En_0 = torch.from_numpy(En_0.astype(np.float32)).to(device)
     En_1 = get_orthonormal_vectors(n_vertex, rotated=1)
-    En_1 = torch.from_numpy(En_1.astype(np.float32)).cuda(device)
+    En_1 = torch.from_numpy(En_1.astype(np.float32)).to(device)
     En_2 = get_orthonormal_vectors(n_vertex, rotated=2)
-    En_2 = torch.from_numpy(En_2.astype(np.float32)).cuda(device)
+    En_2 = torch.from_numpy(En_2.astype(np.float32)).to(device)
+    
+    En_0 = En_0.reshape(n_vertex, 6)
+    En_1 = En_1.reshape(n_vertex, 6)
+    En_2 = En_2.reshape(n_vertex, 6)
+    
     return En_0, En_1, En_2
 
 
@@ -45,6 +50,12 @@ def singleVertexInterpo_7(moving_warp_phi_3d_i, moving_warp_phi_3d_i_cpu, tree, 
     moving_warp_phi_3d_i: torch.tensor, size: [3]
     distance: the distance from each fiexd vertices to the interpolation position
     """
+
+    if k > 30:
+        top1_near_vertex_index = tree.query(moving_warp_phi_3d_i_cpu, k=1)[1].squeeze()
+        inter_weight = torch.tensor([1.0, 0.0, 0.0])
+        inter_indices = torch.tensor([top1_near_vertex_index[0], top1_near_vertex_index[0], top1_near_vertex_index[0]])
+        return inter_indices, inter_weight
 
     top7_near_vertex_index = tree.query(moving_warp_phi_3d_i_cpu, k=k)[1].squeeze()
     candi_faces = []
@@ -132,7 +143,8 @@ def resampleSphereSurf(fixed_xyz, moving_warp_phi_3d, fixed_sulc, neigh_orders, 
     device:             'torch.device('cpu')', or torch.device('cuda:0'), or ,torch.device('cuda:1')
     
     """
-    fixed_inter = torch.zeros((len(moving_warp_phi_3d),1), dtype=torch.float32, device = device)
+#    if len(fixed_sulc.shape) == 1
+    fixed_inter = torch.zeros((len(moving_warp_phi_3d),fixed_sulc.shape[1]), dtype=torch.float32, device = device)
     
     # detach().cpu() cost ~0.2ms
     moving_warp_phi_3d_cpu = moving_warp_phi_3d.detach().cpu().numpy()
@@ -152,15 +164,13 @@ def bilinear_interpolate(im, x, y):
     """
     im: 512*512*C
     """
+    x = torch.clamp(x, 0.001, im.shape[1]-1.001)
+    y = torch.clamp(y, 0.001, im.shape[1]-1.001)
+    
     x0 = torch.floor(x)
     x1 = x0 + 1
     y0 = torch.floor(y)
     y1 = y0 + 1
-
-    x0 = torch.clamp(x0, 0, im.shape[1]-1)
-    x1 = torch.clamp(x1, 0, im.shape[1]-1)
-    y0 = torch.clamp(y0, 0, im.shape[0]-1)
-    y1 = torch.clamp(y1, 0, im.shape[0]-1)
 
     Ia = im[ y0.long(), x0.long() ]
     Ib = im[ y1.long(), x0.long() ]
@@ -180,26 +190,31 @@ def bilinearResampleSphereSurf(vertices_inter, img, radius=1.0):
     assume vertices_fix are on the standard icosahedron discretized spheres
     
     """
+    
     width = img.shape[0]
 
+    vertices_inter[:,2] = torch.clamp(vertices_inter[:,2].clone(), -0.9999999, 0.9999999)
     beta = torch.acos(vertices_inter[:,2]/radius)
     row = beta/(math.pi/(width-1))
-    
-    tmp = (vertices_inter[:,0] == 0).nonzero(as_tuple=True)[0]
-    vertices_inter[:,0][tmp] = 1e-10
-    
+
     alpha = torch.zeros_like(beta)
+    # prevent divide by 0
+    tmp1 = (vertices_inter[:,0] == 0).nonzero(as_tuple=True)[0]
+    vertices_inter[tmp1, 0] = 1e-15
     
-    tmp1 = np.intersect1d((vertices_inter[:,0] >= 0).nonzero(as_tuple=True)[0].cpu(), (vertices_inter[:,1] >= 0).nonzero(as_tuple=True)[0].cpu())
-    alpha[tmp1] = torch.atan(vertices_inter[tmp1][:,1]/vertices_inter[tmp1][:,0]) 
+    tmp1 = (vertices_inter[:,0] > 0).nonzero(as_tuple=True)[0]
+#    print("len(tmp1): ", len(tmp1))
+    alpha[tmp1] = torch.atan(vertices_inter[tmp1, 1]/vertices_inter[tmp1, 0])
     
     tmp2 = (vertices_inter[:,0] < 0).nonzero(as_tuple=True)[0]
-    alpha[tmp2] = torch.atan(vertices_inter[tmp2][:,1]/vertices_inter[tmp2][:,0]) + math.pi
+#    print("len(tmp2): ", len(tmp2))
+    alpha[tmp2] = torch.atan(vertices_inter[tmp2, 1]/vertices_inter[tmp2, 0]) + math.pi
     
-    tmp3 = np.intersect1d((vertices_inter[:,0] >= 0).nonzero(as_tuple=True)[0].cpu(), (vertices_inter[:,1] < 0).nonzero(as_tuple=True)[0].cpu())
-    alpha[tmp3] = torch.atan(vertices_inter[tmp3][:,1]/vertices_inter[tmp3][:,0]) + 2*math.pi
+    alpha = alpha + math.pi * 2
+    alpha = torch.remainder(alpha, math.pi * 2)
     
-    assert len(tmp1) + len(tmp2) + len(tmp3) == len(vertices_inter)
+    if len(tmp1) + len(tmp2) != len(vertices_inter):
+        print("len(tmp1) + len(tmp2) != len(vertices_inter), subtraction is: ", len(tmp1) + len(tmp2) - len(vertices_inter))
     
     col = alpha/(2*math.pi/(width-1))
     
@@ -207,6 +222,26 @@ def bilinearResampleSphereSurf(vertices_inter, img, radius=1.0):
     
     return feat_inter 
         
+
+def bilinearResampleSphereSurf_v2(vertices_inter, feat, bi_inter, radius=1.0):
+    """
+    ONLY!! assume vertices_fix are on the standard icosahedron discretized spheres!!
+    
+    """
+    inter_indices, inter_weights = bi_inter
+    width = int(np.sqrt(len(inter_indices)))
+    img = torch.sum(((feat[inter_indices.flatten()]).reshape(inter_indices.shape[0], inter_indices.shape[1], feat.shape[1])) * ((inter_weights.unsqueeze(2)).repeat(1,1,feat.shape[1])), 1)
+    img = img.reshape(width, width, feat.shape[1])
+    
+
+    
+    return bilinearResampleSphereSurf(vertices_inter, img)
+    
+    
+    
+    
+    
+
 #    """ multiple processes method: 163842: 9.6s, 40962: 2.8s, 10242: 1.0s, 2562: 0.28s """
 #    pool = torch.multiprocessing.Pool()
 #    num_processes = 4      # torch.multiprocessing.cpu_count()

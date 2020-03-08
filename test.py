@@ -27,7 +27,7 @@ out_ch = 2  # two components for tangent plane deformation vector
 device = torch.device('cuda:1')
 batch_size = 1
 data_for_test = 0.3
-model_name = 'regis_curv_40962_3d_smooth0p5_phiconsis0p8_corr0p4_3model'
+model_name = 'regis_curv_40962_3d_smooth1p3_phiconsis0p7_corr0p5_3model'
 truncated = False
 regis_feat = 'curv' # 'sulc' or 'curv'
 

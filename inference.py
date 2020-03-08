@@ -15,7 +15,7 @@ import argparse
 import math 
 
 from utils_interpolation import resampleSphereSurf, bilinearResampleSphereSurf
-from utils import get_orthonormal_vectors, get_z_weight, get_vertex_dis
+from utils import get_z_weight, get_vertex_dis, get_upsample_order
 from utils_vtk import read_vtk, write_vtk, resample_label
 from utils_torch import getEn
 
@@ -24,8 +24,8 @@ import time
 
 
 def get_bi_inter(n_vertex):
-    inter_indices = np.load('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_indices_'+ str(n_vertex) +'.npy')
-    inter_weights = np.load('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_weights_'+ str(n_vertex) +'.npy')
+    inter_indices = np.load('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_indices_'+ str(n_vertex) +'_0.npy')
+    inter_weights = np.load('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_weights_'+ str(n_vertex) +'_0.npy')
     
     return inter_indices, inter_weights
 
@@ -37,15 +37,15 @@ def get_trained_model(n_vertex, device):
     n_res = level-1 if level<6 else 5
     
     model_0 = Unet(in_ch=in_ch, out_ch=out_ch, level=level, n_res=n_res, rotated=0)
-    model_0.cuda(device)
+    model_0.to(device)
     model_0.load_state_dict(torch.load('/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/model/regis_'+str(n_vertex)+'_0.mdl'))
     
     model_1 = Unet(in_ch=in_ch, out_ch=out_ch, level=level, n_res=n_res, rotated=1)
-    model_1.cuda(device)
+    model_1.to(device)
     model_1.load_state_dict(torch.load('/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/model/regis_'+str(n_vertex)+'_1.mdl'))
     
     model_2 = Unet(in_ch=in_ch, out_ch=out_ch, level=level, n_res=n_res, rotated=2)
-    model_2.cuda(device)
+    model_2.to(device)
     model_2.load_state_dict(torch.load('/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/model/regis_'+str(n_vertex)+'_2.mdl'))
     
     return model_0, model_1, model_2
@@ -56,17 +56,17 @@ def getOverlapIndex(n_vertex, device):
     Compute the overlap indices' index for the 3 deforamtion field
     """
     z_weight_0 = get_z_weight(n_vertex, 0)
-    z_weight_0 = torch.from_numpy(z_weight_0.astype(np.float32)).cuda(device)
+    z_weight_0 = torch.from_numpy(z_weight_0.astype(np.float32)).to(device)
     index_0_0 = (z_weight_0 == 1).nonzero()
     index_0_1 = (z_weight_0 < 1).nonzero()
     assert len(index_0_0) + len(index_0_1) == n_vertex, "error!"
     z_weight_1 = get_z_weight(n_vertex, 1)
-    z_weight_1 = torch.from_numpy(z_weight_1.astype(np.float32)).cuda(device)
+    z_weight_1 = torch.from_numpy(z_weight_1.astype(np.float32)).to(device)
     index_1_0 = (z_weight_1 == 1).nonzero()
     index_1_1 = (z_weight_1 < 1).nonzero()
     assert len(index_1_0) + len(index_1_1) == n_vertex, "error!"
     z_weight_2 = get_z_weight(n_vertex, 2)
-    z_weight_2 = torch.from_numpy(z_weight_2.astype(np.float32)).cuda(device)
+    z_weight_2 = torch.from_numpy(z_weight_2.astype(np.float32)).to(device)
     index_2_0 = (z_weight_2 == 1).nonzero()
     index_2_1 = (z_weight_2 < 1).nonzero()
     assert len(index_2_0) + len(index_2_1) == n_vertex, "error!"
@@ -74,15 +74,15 @@ def getOverlapIndex(n_vertex, device):
     index_01 = np.intersect1d(index_0_0.detach().cpu().numpy(), index_1_0.detach().cpu().numpy())
     index_02 = np.intersect1d(index_0_0.detach().cpu().numpy(), index_2_0.detach().cpu().numpy())
     index_12 = np.intersect1d(index_1_0.detach().cpu().numpy(), index_2_0.detach().cpu().numpy())
-    index_01 = torch.from_numpy(index_01).cuda(device)
-    index_02 = torch.from_numpy(index_02).cuda(device)
-    index_12 = torch.from_numpy(index_12).cuda(device)
+    index_01 = torch.from_numpy(index_01).to(device)
+    index_02 = torch.from_numpy(index_02).to(device)
+    index_12 = torch.from_numpy(index_12).to(device)
     rot_mat_01 = torch.tensor([[np.cos(np.pi/2), 0, np.sin(np.pi/2)],
                                [0., 1., 0.],
-                               [-np.sin(np.pi/2), 0, np.cos(np.pi/2)]]).cuda(device)
+                               [-np.sin(np.pi/2), 0, np.cos(np.pi/2)]]).to(device)
     rot_mat_12 = torch.tensor([[1., 0., 0.],
                                [0, np.cos(np.pi/2), -np.sin(np.pi/2)],
-                               [0, np.sin(np.pi/2), np.cos(np.pi/2)]]).cuda(device)
+                               [0, np.sin(np.pi/2), np.cos(np.pi/2)]]).to(device)
     rot_mat_02 = torch.mm(rot_mat_12, rot_mat_01)
     rot_mat_20 = torch.inverse(rot_mat_02)
     
@@ -97,19 +97,19 @@ def getOverlapIndex(n_vertex, device):
     index_triple_computed = (counts == 3).nonzero().squeeze()
     tmp = np.intersect1d(index_02.cpu().numpy(), index_triple_computed.cpu().numpy())
     assert (tmp == index_triple_computed.cpu().numpy()).all(), "(tmp == index_triple_computed.cpu().numpy()).all(), error"
-    index_double_02 = torch.from_numpy(np.setdiff1d(index_02.cpu().numpy(), index_triple_computed.cpu().numpy())).cuda(device)
+    index_double_02 = torch.from_numpy(np.setdiff1d(index_02.cpu().numpy(), index_triple_computed.cpu().numpy())).to(device)
     tmp = np.intersect1d(index_12.cpu().numpy(), index_triple_computed.cpu().numpy())
     assert (tmp == index_triple_computed.cpu().numpy()).all(), "(tmp == index_triple_computed.cpu().numpy()).all(), error"
-    index_double_12 = torch.from_numpy(np.setdiff1d(index_12.cpu().numpy(), index_triple_computed.cpu().numpy())).cuda(device)
+    index_double_12 = torch.from_numpy(np.setdiff1d(index_12.cpu().numpy(), index_triple_computed.cpu().numpy())).to(device)
     tmp = np.intersect1d(index_01.cpu().numpy(), index_triple_computed.cpu().numpy())
     assert (tmp == index_triple_computed.cpu().numpy()).all(), "(tmp == index_triple_computed.cpu().numpy()).all(), error"
-    index_double_01 = torch.from_numpy(np.setdiff1d(index_01.cpu().numpy(), index_triple_computed.cpu().numpy())).cuda(device)
+    index_double_01 = torch.from_numpy(np.setdiff1d(index_01.cpu().numpy(), index_triple_computed.cpu().numpy())).to(device)
     assert len(index_double_01) + len(index_double_12) + len(index_double_02) + len(index_triple_computed) == n_vertex, "double computed and three computed error"
 
     return rot_mat_01, rot_mat_12, rot_mat_02, rot_mat_20, index_double_02, index_double_12, index_double_01, index_triple_computed
 
 
-def inferDeformation(model, En, merge_index, moving, fixed_sulc, device, truncated=False, diffe=False, num_composition=3):
+def inferDeformation(model, En, merge_index, moving, fixed_sulc, device, truncated=False, diffe=False, num_composition=5):
     """
     infer the deformation from the 3 model framework
     
@@ -140,8 +140,8 @@ def inferDeformation(model, En, merge_index, moving, fixed_sulc, device, truncat
     rot_mat_01, rot_mat_12, rot_mat_02, rot_mat_20, index_double_02, index_double_12, index_double_01, index_triple_computed = merge_index
     En_0, En_1, En_2 = En
     
-    moving = torch.from_numpy(moving.astype(np.float32)).cuda(device)
-    fixed_sulc = torch.from_numpy(fixed_sulc.astype(np.float32)).cuda(device)
+    moving = torch.from_numpy(moving.astype(np.float32)).to(device)
+    fixed_sulc = torch.from_numpy(fixed_sulc.astype(np.float32)).to(device)
     
     with torch.no_grad():
         data = torch.cat((moving.unsqueeze(1), fixed_sulc.unsqueeze(1)), 1)
@@ -165,29 +165,34 @@ def inferDeformation(model, En, merge_index, moving, fixed_sulc, device, truncat
             phi_2d_0 = phi_2d_0/math.pow(2,num_composition)
             phi_2d_1 = phi_2d_1/math.pow(2,num_composition)
             phi_2d_2 = phi_2d_2/math.pow(2,num_composition)
-            
-        phi_3d_0 = torch.zeros(3, len(En_0)).cuda(device)
-        for j in range(len(En_0)):
-            phi_3d_0[:,j] = torch.squeeze(torch.mm(En_0[j,:,:], torch.unsqueeze(phi_2d_0[j,:],1)))
-        phi_3d_1 = torch.zeros(3, len(En_1)).cuda(device)
-        for j in range(len(En_1)):
-            phi_3d_1[:,j] = torch.squeeze(torch.mm(En_1[j,:,:], torch.unsqueeze(phi_2d_1[j,:],1)))
-        phi_3d_2 = torch.zeros(3, len(En_2)).cuda(device)
-        for j in range(len(En_2)):
-            phi_3d_2[:,j] = torch.squeeze(torch.mm(En_2[j,:,:], torch.unsqueeze(phi_2d_2[j,:],1)))
-    
-        phi_3d_0_to_1 = torch.mm(rot_mat_01, phi_3d_0)
+
+        phi_3d_0 = torch.zeros(len(En_0), 3).to(device)
+        phi_3d_1 = torch.zeros(len(En_1), 3).to(device)
+        phi_3d_2 = torch.zeros(len(En_2), 3).to(device)
+        
+        tmp = En_0 * phi_2d_0.repeat(1,3)
+        phi_3d_0[:,0] = tmp[:,0] + tmp[:,1]
+        phi_3d_0[:,1] = tmp[:,2] + tmp[:,3]
+        phi_3d_0[:,2] = tmp[:,4] + tmp[:,5]
+        
+        tmp = En_1 * phi_2d_1.repeat(1,3)
+        phi_3d_1[:,0] = tmp[:,0] + tmp[:,1]
+        phi_3d_1[:,1] = tmp[:,2] + tmp[:,3]
+        phi_3d_1[:,2] = tmp[:,4] + tmp[:,5]
+        
+        tmp = En_2 * phi_2d_2.repeat(1,3)
+        phi_3d_2[:,0] = tmp[:,0] + tmp[:,1]
+        phi_3d_2[:,1] = tmp[:,2] + tmp[:,3]
+        phi_3d_2[:,2] = tmp[:,4] + tmp[:,5]
+        
+        phi_3d_0_to_1 = torch.mm(rot_mat_01, torch.transpose(phi_3d_0, 0, 1))
         phi_3d_0_to_1 = torch.transpose(phi_3d_0_to_1, 0, 1)
-        phi_3d_1_to_2 = torch.mm(rot_mat_12, phi_3d_1)
+        phi_3d_1_to_2 = torch.mm(rot_mat_12, torch.transpose(phi_3d_1, 0, 1))
         phi_3d_1_to_2 = torch.transpose(phi_3d_1_to_2, 0, 1)
-        phi_3d_0_to_2 = torch.mm(rot_mat_02, phi_3d_0)
+        phi_3d_0_to_2 = torch.mm(rot_mat_02, torch.transpose(phi_3d_0, 0, 1))
         phi_3d_0_to_2 = torch.transpose(phi_3d_0_to_2, 0, 1)
         
-        phi_3d_0 = torch.transpose(phi_3d_0, 0, 1)
-        phi_3d_1 = torch.transpose(phi_3d_1, 0, 1)
-        phi_3d_2 = torch.transpose(phi_3d_2, 0, 1)
-        
-        phi_3d = torch.zeros(len(En_0), 3).cuda(device)
+        phi_3d = torch.zeros(len(En_0), 3).to(device)
         phi_3d[index_double_02] = (phi_3d_0_to_2[index_double_02] + phi_3d_2[index_double_02])/2.0
         phi_3d[index_double_12] = (phi_3d_1_to_2[index_double_12] + phi_3d_2[index_double_12])/2.0
         tmp = (phi_3d_0_to_1[index_double_01] + phi_3d_1[index_double_01])/2.0
@@ -204,8 +209,8 @@ def diffeomorp(phi, fixed_xyz, diffe_iter, bi=False, bi_inter=None):
     
     # compute exp
     for i in range(diffe_iter):
-        if bi == True:
-            warped_vertices = bilinearResampleSphereSurf(fixed_xyz, warped_vertices, warped_vertices, bi_inter)
+        if bi:
+            warped_vertices = bilinearResampleSphereSurf(warped_vertices, warped_vertices, bi_inter)
         else:
             warped_vertices = resampleSphereSurf(fixed_xyz, warped_vertices, warped_vertices)
         
@@ -228,9 +233,12 @@ def projectOntoTangentPlane(curr_vertices, phi):
     return phi
 
 
-def inferTotalDeform(model, En, merge_index, n_vertex, total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, truncated=False, diffe=False, diffe_iter=2, bi=False, bi_inter=None):
+def inferTotalDeform(model, En, merge_index, n_vertex, total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, truncated=False, upsample_neighbors=None, diffe=False, diffe_iter=4, bi=False, bi_inter=None):
+    if bi:
+        assert bi_inter is not None, "bi_inter is None!"
+        
     if len(total_deform) < n_vertex:
-        total_deform = resampleSphereSurf(fixed_xyz[0:len(total_deform),:], fixed_xyz[0:n_vertex,:], total_deform)
+        total_deform = resampleSphereSurf(fixed_xyz[0:len(total_deform),:], fixed_xyz[0:n_vertex,:], total_deform, std=True, upsample_neighbors=upsample_neighbors)
         total_deform = projectOntoTangentPlane(fixed_xyz[0:n_vertex,:], total_deform)
         
     moving_warp_phi = fixed_xyz[0:n_vertex,:] + total_deform
@@ -238,10 +246,13 @@ def inferTotalDeform(model, En, merge_index, n_vertex, total_deform, fixed_xyz, 
     moving_warp_phi_resample = resampleSphereSurf(moving_warp_phi, fixed_xyz[0:n_vertex,:], moving_sulc[0:n_vertex])
     phi = inferDeformation(model, En, merge_index, moving_warp_phi_resample, fixed_sulc[0:n_vertex], device, truncated=truncated, diffe=diffe)
     
-    if diffe == True:
+    if diffe:
         phi = diffeomorp(phi, fixed_xyz[0:n_vertex,:], diffe_iter, bi=bi, bi_inter=bi_inter)
     
-    phi_reinterpo = resampleSphereSurf(fixed_xyz[0:n_vertex,:], moving_warp_phi, phi)
+    if bi:
+        phi_reinterpo = bilinearResampleSphereSurf(moving_warp_phi, phi, bi_inter)
+    else:
+        phi_reinterpo = resampleSphereSurf(fixed_xyz[0:n_vertex,:], moving_warp_phi, phi)
     phi_reinterpo = projectOntoTangentPlane(moving_warp_phi, phi_reinterpo)
     
     total_deform = total_deform + phi_reinterpo
@@ -254,7 +265,7 @@ def inferTotalDeform(model, En, merge_index, n_vertex, total_deform, fixed_xyz, 
 #atlas_name = '/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.163842.rotated_0.vtk'
 
 
-device = torch.device('cuda:1')
+device = torch.device('cuda:0')
 
 model_642 = get_trained_model(642, device)
 model_2562 = get_trained_model(2562, device)
@@ -272,6 +283,12 @@ merge_index_10242 = getOverlapIndex(10242, device)
 merge_index_40962 = getOverlapIndex(40962, device)
 
 bi_inter_40962 = get_bi_inter(40962)
+bi_inter_10242 = get_bi_inter(10242)
+
+upsample_neighbors_2562 = get_upsample_order(2562)
+upsample_neighbors_10242 = get_upsample_order(10242)
+upsample_neighbors_40962 = get_upsample_order(40962)
+upsample_neighbors_163842 = get_upsample_order(163842)
 
 
 def registerToAtlas(file_name, atlas_name):
@@ -302,23 +319,51 @@ def registerToAtlas(file_name, atlas_name):
     total_deform = inferDeformation(model_642, En_642, merge_index_642, moving_sulc[0:642], fixed_sulc[0:642], device)
    
     # reigs on 2562 vertices
-    total_deform = inferTotalDeform(model_2562, En_2562, merge_index_2562, 2562, total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, truncated=False)
+    total_deform = inferTotalDeform(model_2562, En_2562, merge_index_2562, 2562, 
+                                    total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, 
+                                    truncated=False, upsample_neighbors=upsample_neighbors_2562)
     
     # reigs on 10242 vertices
-    total_deform = inferTotalDeform(model_10242, En_10242, merge_index_10242, 10242, total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, truncated=True)
-    total_deform = inferTotalDeform(model_10242, En_10242, merge_index_10242, 10242, total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, truncated=True)
-#    total_deform = inferTotalDeform(model_10242, En_10242, merge_index_10242, 10242, total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, truncated=True)
+    total_deform = inferTotalDeform(model_10242, En_10242, merge_index_10242, 10242, 
+                                    total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, 
+                                    truncated=True, upsample_neighbors=upsample_neighbors_10242)
+    total_deform = inferTotalDeform(model_10242, En_10242, merge_index_10242, 10242, 
+                                    total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, 
+                                    truncated=True, upsample_neighbors=upsample_neighbors_10242)
+    total_deform = inferTotalDeform(model_10242, En_10242, merge_index_10242, 10242, 
+                                    total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, 
+                                    truncated=True, upsample_neighbors=upsample_neighbors_10242)
+#    total_deform = inferTotalDeform(model_10242, En_10242, merge_index_10242, 10242, 
+#                                    total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, 
+#                                    truncated=False, upsample_neighbors=upsample_neighbors_10242,
+#                                    diffe=True, diffe_iter=3, bi=True, bi_inter=bi_inter_10242)
     
+#    total_deform = inferTotalDeform(model_40962, En_40962, merge_index_40962, 40962, 
+#                                    total_deform, fixed_xyz, moving_curv, fixed_curv, device, 
+#                                    truncated=True, upsample_neighbors=upsample_neighbors_40962, 
+#                                    diffe=False, diffe_iter=3, bi=True, bi_inter=bi_inter_40962)
     # reigs on 40962 vertices
-    total_deform = inferTotalDeform(model_40962, En_40962, merge_index_40962, 40962, total_deform, fixed_xyz, moving_curv, fixed_curv, device, truncated=False, diffe=True, diffe_iter=3, bi=True, bi_inter=bi_inter_40962)
+    total_deform = inferTotalDeform(model_40962, En_40962, merge_index_40962, 40962, 
+                                    total_deform, fixed_xyz, moving_curv, fixed_curv, device, 
+                                    truncated=True, upsample_neighbors=upsample_neighbors_40962, 
+                                    diffe=False, diffe_iter=4, bi=True, bi_inter=bi_inter_40962)
+    total_deform = inferTotalDeform(model_40962, En_40962, merge_index_40962, 40962, 
+                                    total_deform, fixed_xyz, moving_curv, fixed_curv, device, 
+                                    truncated=True, upsample_neighbors=upsample_neighbors_40962, 
+                                    diffe=False, diffe_iter=4, bi=True, bi_inter=bi_inter_40962)
+#    total_deform = inferTotalDeform(model_40962, En_40962, merge_index_40962, 40962, 
+#                                    total_deform, fixed_xyz, moving_curv, fixed_curv, device, 
+#                                    truncated=True, upsample_neighbors=upsample_neighbors_40962, 
+#                                    diffe=False, diffe_iter=3, bi=True, bi_inter=bi_inter_40962)
     
-    total_deform = resampleSphereSurf(fixed_xyz[0:40962,:], fixed_xyz, total_deform)
+    
+    total_deform = resampleSphereSurf(fixed_xyz[0:40962,:], fixed_xyz, total_deform, std=True, upsample_neighbors=upsample_neighbors_163842)
     total_deform = projectOntoTangentPlane(fixed_xyz, total_deform)
     moving_warp_phi_163842 = fixed_xyz + total_deform
     moving_warp_phi_163842 = moving_warp_phi_163842/np.linalg.norm(moving_warp_phi_163842, axis=1)[:,np.newaxis]
     
     moved = {'vertices': moving_warp_phi_163842 * 100.0,
-             'faces': surf_163842['faces'],
+             'faces': atlas['faces'],
              'curv': moving_curv * (2.08+2.32) - 2.32,
              'sulc': moving_sulc * (13.65+11.5) - 11.5}
     if 'par_vec' in surf_163842.keys():
@@ -327,21 +372,21 @@ def registerToAtlas(file_name, atlas_name):
     
     t1 = time.time()
     
-    surf_163842['deformation'] = total_deform * 100.0
-    write_vtk(surf_163842, file_name[:-3]+'deform.vtk')
-     
-    moved_resample_sulc_curv = resampleSphereSurf(moving_warp_phi_163842, fixed_xyz, np.hstack((moved['sulc'][:,np.newaxis], moved['curv'][:,np.newaxis])))
-    moved_resample = {'vertices': surf_163842['vertices'],
-                      'faces': surf_163842['faces'],
-                      'sulc': moved_resample_sulc_curv[:,0],
-                      'curv': moved_resample_sulc_curv[:,1]}
-    if 'par_vec' in surf_163842.keys():
-        resample_lbl = resample_label(moving_warp_phi_163842, fixed_xyz, surf_163842['par_vec'])
-        moved_resample['par_vec'] = resample_lbl
-    write_vtk(moved_resample, file_name[:-3]+'moved.resampled.163842.vtk')
-    
+#    surf_163842['deformation'] = total_deform * 100.0
+#    write_vtk(surf_163842, file_name[:-3]+'deform.vtk')
+#     
+#    moved_resample_sulc_curv = resampleSphereSurf(moving_warp_phi_163842, fixed_xyz, np.hstack((moved['sulc'][:,np.newaxis], moved['curv'][:,np.newaxis])))
+#    moved_resample = {'vertices': atlas['vertices'],
+#                      'faces': atlas['faces'],
+#                      'sulc': moved_resample_sulc_curv[:,0],
+#                      'curv': moved_resample_sulc_curv[:,1]}
+#    if 'par_vec' in surf_163842.keys():
+#        resample_lbl = resample_label(moving_warp_phi_163842, fixed_xyz, surf_163842['par_vec'])
+#        moved_resample['par_vec'] = resample_lbl
+#    write_vtk(moved_resample, file_name[:-3]+'moved.resampled.163842.vtk')
+#    
     return (t1-t0)
-    
+  
 
 #if __name__ == "__main__":    
 #    parser = argparse.ArgumentParser(description='Rigister the surface to the atlas',
@@ -369,5 +414,7 @@ cost = np.zeros(len(files))
 for i in range(len(files)):
     print(i)
     file = files[i]
+    print(file)
     cost[i] = registerToAtlas(file, '/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.163842.rotated_0.vtk')
     print(cost[i], "s")
+print("cost mean: ", cost.mean())

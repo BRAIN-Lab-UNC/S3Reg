@@ -9,12 +9,12 @@ Created on Fri Jan  3 11:13:58 2020
 import numpy as np
 import glob
 import os
-from utils_vtk import read_vtk, remove_field, write_vtk
+from utils_vtk import read_vtk, remove_field, write_vtk, resample_label
 from utils import get_orthonormal_vectors, get_neighs_order
 import matplotlib.pyplot as plt
 from sklearn.neighbors import KDTree
 import scipy.io as sio 
-from utils_interpolation import singleVertexInterpo
+from utils_interpolation import resampleSphereSurf
 
 #####################################################################
 """ compute the number of subjects of each month """
@@ -691,13 +691,15 @@ for i in range(len(files)):
 """ compute ineterpolated indices and weights for fixed 40962 sphere to alpha beta image """
 i = 1
 shape = [512,512]
+n_vertex =10242
+rotated = 2
 
-sphere_40962 = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.40962.rotated_2.vtk') 
-vertices = sphere_40962['vertices'].astype(np.float64)
+sphere = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+ str(10242)+'.rotated_'+ str(rotated) +'.vtk') 
+vertices = sphere['vertices'].astype(np.float64)
 tree = KDTree(vertices, leaf_size=10)  # build kdtree
-faces = sphere_40962['faces']
+faces = sphere['faces']
 faces = faces[:,1:]
-neigh_orders = get_neighs_order('neigh_indices/adj_mat_order_40962_rotated_2.mat')
+neigh_orders = get_neighs_order('neigh_indices/adj_mat_order_'+ str(n_vertex) +'_rotated_'+ str(rotated) +'.mat')
 
 assert shape[0] == shape[1], "Shape should be square."
 
@@ -713,10 +715,73 @@ for p in range(shape[0]):
         x = 100 * np.sin(beta) * np.cos(alpha)
         y = 100 * np.sin(beta) * np.sin(alpha)
         z = 100 * np.cos(beta)
-    
         sphere_loc = np.array([x, y, z])
-        
         inter_indices[p*shape[0]+q,:], inter_weights[p*shape[0]+q,:] = singleVertexInterpo(sphere_loc, vertices, tree, neigh_orders)
  
-np.save('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_indices_40962_2.npy', inter_indices)
-np.save('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_weights_40962_2.npy', inter_weights)
+np.save('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_indices_'+ str(n_vertex) +'_'+ str(rotated) +'.npy', inter_indices)
+np.save('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_weights_'+ str(n_vertex) +'_'+ str(rotated) +'.npy', inter_weights)
+
+
+####################################################################
+""" Write complete sphere with sulc and curv for NEW SD reg results using resampled sphere """
+
+files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/data/SD_registration/*/surf/lh.NewResampledAlignedToBCPAtlas.sphere.vtk'))
+
+s_163842 = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.163842.rotated_0.vtk')
+
+for i in range(len(files)):
+    s = read_vtk(files[i])
+    s['sulc'] = np.loadtxt('/media/fenqiang/DATA/unc/Data/registration/data/SD_registration/'+ files[i].split('/')[9] +'/surf/lh.sphere.sulc.resampled.txt')
+    s['curv'] = np.loadtxt('/media/fenqiang/DATA/unc/Data/registration/data/SD_registration/'+ files[i].split('/')[9] +'/surf/lh.sphere.curv.resampled.txt')
+    
+    s2 = read_vtk('/media/fenqiang/DATA/unc/Data/registration/data/preprocessed_npy/'+ files[i].split('/')[9] +'/'+ files[i].split('/')[9] +'.lh.SphereSurf.Orig.sphere.resampled.163842.vtk')
+    
+    if 'par_vec' in s2.keys():
+        s['par_vec'] = s2['par_vec']
+    write_vtk(s, files[i])
+    
+    resample_sulc_curv = resampleSphereSurf(s['vertices'], s_163842['vertices'], np.hstack((s['sulc'][:,np.newaxis], s['curv'][:,np.newaxis])))
+    
+    moved_resample = {'vertices': s_163842['vertices'],
+                      'faces': s_163842['faces'],
+                      'sulc': resample_sulc_curv[:,0],
+                      'curv': resample_sulc_curv[:,1]}
+        
+    if 'par_vec' in s2.keys():
+        moved_resample['par_vec'] = resample_label(s['vertices'], moved_resample['vertices'], s['par_vec'])
+    write_vtk(moved_resample, files[i].replace('.vtk','resampled.163842.vtk'))
+
+
+##########################################################################
+def maunal_label(in_dic, field, ind, label):
+    label = np.asarray(label)
+    orig_lbl = in_dic[field]
+    orig_lbl[ind] = label
+    in_dic[field] = orig_lbl
+    
+    return in_dic
+
+files = ['/media/fenqiang/DATA/unc/Data/registration/data/MSM/MNBCP266437_574/surf/Curv.L.sphere.reg.sucu.vtk',
+        '/media/fenqiang/DATA/unc/Data/registration/data/preprocessed_npy/MNBCP266437_574/MNBCP266437_574.lh.SphereSurf.Orig.sphere.resampled.163842.moved.vtk',
+        '/media/fenqiang/DATA/unc/Data/registration/data/preprocessed_npy/MNBCP266437_574/MNBCP266437_574.lh.SphereSurf.Orig.sphere.resampled.163842.vtk',
+        '/media/fenqiang/DATA/unc/Data/registration/data/SD_registration/MNBCP266437_574/surf/lh.NewResampledAlignedToBCPAtlas.sphere.vtk']
+
+
+for file in files:
+    a = read_vtk(file)
+    a = maunal_label(a, 'par_vec', [10301,
+72513,
+93990,
+129464,
+150229
+], [20,180,140])
+    write_vtk(a, file)
+
+
+
+
+
+
+
+
+

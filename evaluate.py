@@ -10,13 +10,12 @@ import numpy as np
 import glob
 import math, multiprocessing
 
-from utils_vtk import read_vtk
+from utils_vtk import read_vtk, write_vtk
 from utils import get_par_36_to_fs_vec
 
 
-
 DL_files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/data/preprocessed_npy/*/*.lh.SphereSurf.Orig.sphere.resampled.163842.moved.resampled.163842.vtk'))
-SD_files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/data/SD_registration/*/surf/lh.AlignedToBCPAtlas.sphere.resampled.sucu.vtk'))
+SD_files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/data/SD_registration/*/surf/lh.NewResampledAlignedToBCPAtlas.sphereresampled.163842.vtk'))
 MSM_files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/data/MSM/*/surf/Curv.L.sphere.reg.sucu.resampled.vtk'))
 
 #DL_files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/SphericalMappingWithNewCurvSulc/DL_reg/sub*_lh.SphereSurf.Resampled160K.moved.resampled.163842.vtk'))
@@ -90,17 +89,63 @@ def evaluate(files):
 
 print("evaluate DL:")
 evaluate(DL_files)
+
 print("evaluate SD:")
 evaluate(SD_files)
+
 print("evaluate MSM:")
 evaluate(MSM_files)
 
 
 ###############################################################################
 
+sphere_template = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.163842.rotated_0.vtk')
+inner_template = read_vtk('/media/fenqiang/DATA/unc/Data/Template/UNC-Infant-Cortical-Surface-Atlas/18/18_lh.InnerSurf.vtk')
+inflate_templat = read_vtk('/media/fenqiang/DATA/unc/Data/Template/UNC-Infant-Cortical-Surface-Atlas/18/18_lh.InnerSurf.inflated.vtk')
+
+a = sulc.mean(0)
+b = curv.mean(0)
+
+sphere_template['sulc'] = a
+sphere_template['curv'] = b
+write_vtk(sphere_template,  '/media/fenqiang/DATA/unc/Data/registration/ForFigure/MSM_atlas.sphere.vtk')
+
+inner_template['sulc'] = a
+inner_template['curv'] = b
+write_vtk(inner_template,  '/media/fenqiang/DATA/unc/Data/registration/ForFigure/MSM_atlas.inner.vtk')
+
+
+inflate_templat['sulc'] = a
+inflate_templat['curv'] = b
+write_vtk(inflate_templat,  '/media/fenqiang/DATA/unc/Data/registration/ForFigure/DL_atlas.inflate.vtk')
+
+###############################################################################
+
+template = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.163842.rotated_0.vtk')
+faces = template['faces']
+faces = faces[:,1:]
+    
+vertex_faces = list(range(163842))
+for i in range(len(vertex_faces)):
+    vertex_faces[i] = []
+    
+for i in range(len(faces)):
+#    print(i)
+    vertex_faces[faces[i,0]].append(i)
+    vertex_faces[faces[i,1]].append(i)
+    vertex_faces[faces[i,2]].append(i)
+    
+for i in range(163842):
+    if(len(vertex_faces[i]) == 5):
+        vertex_faces[i].append(vertex_faces[i][0])
+        
+vertex_faces = np.asarray(vertex_faces)
+
+
+
 def compute_triangles_area(a, b, c):
     """
-    a, b, c: N*3 numpu array, represents three vertices 
+    a, b, c: N*3 numpy array, represents three vertices 
     """
     return np.linalg.norm(np.cross(a-b, c-b), axis=1)/2.0
 
@@ -119,26 +164,38 @@ def compute_area_dis(old_file, new_file):
     
     old_area = compute_triangles_area(old_ver[faces_1[:,0],:], old_ver[faces_1[:,1],:], old_ver[faces_1[:,2],:])
     new_area = compute_triangles_area(new_ver[faces_1[:,0],:], new_ver[faces_1[:,1],:], new_ver[faces_1[:,2],:])
-    area_dis = abs(old_area - new_area)
+
+    if np.any(old_area == 0) or np.any(new_area == 0):
+        return 0 
     
-    return area_dis.mean()
+    area_dis = np.mean(np.abs(np.mean(np.log2(old_area[vertex_faces] / new_area[vertex_faces]), axis=1)))
+
+    return area_dis
 
 DL_area_dis = np.zeros(len(DL_files))
 for i in range(len(DL_files)):
     print(i)
     DL_area_dis[i] = compute_area_dis(DL_files[i].replace('.moved.resampled.163842.vtk','.vtk'), DL_files[i].replace('.moved.resampled.163842.vtk','.moved.vtk'))
     
+DL_area_dis[(DL_area_dis==0).nonzero()] = DL_area_dis[(DL_area_dis != 0).nonzero()].mean()
+print("DL_area_dis, mean, std:", DL_area_dis.mean(), DL_area_dis.std())
+    
+
 SD_area_dis = np.zeros(len(SD_files))
 for i in range(len(SD_files)):
     print(i)
-    SD_area_dis[i] = compute_area_dis(SD_files[i].replace('lh.AlignedToBCPAtlas.sphere.resampled.sucu.vtk','lh.AlignedToBCPAtlas.sphere.vtk'), SD_files[i].replace('lh.AlignedToBCPAtlas.sphere.resampled.sucu.vtk','lh.sphere.vtk'))
+    SD_area_dis[i] = compute_area_dis(SD_files[i].replace('lh.NewResampledAlignedToBCPAtlas.sphereresampled.163842.vtk','lh.sphere.resampled.vtk'), SD_files[i].replace('lh.NewResampledAlignedToBCPAtlas.sphereresampled.163842.vtk','lh.NewResampledAlignedToBCPAtlas.sphere.vtk'))
     
+SD_area_dis[(SD_area_dis==0).nonzero()] = SD_area_dis[(SD_area_dis != 0).nonzero()].mean()
+print("SD_area_dis, mean, std:", SD_area_dis.mean(), SD_area_dis.std())    
+
+
 MSM_area_dis = np.zeros(len(MSM_files))
 for i in range(len(MSM_files)):
     print(i)
     MSM_area_dis[i] = compute_area_dis(MSM_files[i].replace('Curv.L.sphere.reg.sucu.resampled.vtk','lh.sphere.resampled.vtk'), MSM_files[i].replace('Curv.L.sphere.reg.sucu.resampled.vtk','Curv.L.sphere.reg.vtk'))
-    
-print("DL_area_dis, mean, std:", DL_area_dis.mean(), DL_area_dis.std())
-print("SD_area_dis, mean, std:", SD_area_dis.mean(), SD_area_dis.std())
+
+MSM_area_dis[(MSM_area_dis==0).nonzero()] = MSM_area_dis[(MSM_area_dis != 0).nonzero()].mean()
 print("MSM_area_dis, mean, std:", MSM_area_dis.mean(), MSM_area_dis.std())
     
+

@@ -293,6 +293,153 @@ class SpatialTransformer(nn.Module):
 
 
 
+class svgg(nn.Module):
+    def __init__(self, in_ch, out_ch, level, n_res, rotated=0):
+        super(svgg, self).__init__()
+        
+        neigh_orders = Get_neighs_order(rotated)
+        neigh_orders = neigh_orders[8-level:8-level+n_res]
+        conv_layer = onering_conv_layer
+
+        chs = [in_ch]
+        for i in range(n_res):
+            chs.append(2**i*32)
+
+        sequence = []
+        sequence.append(conv_layer(chs[0], chs[1], neigh_orders[0]))
+        sequence.append(nn.BatchNorm1d(chs[1]))
+        sequence.append(nn.LeakyReLU(0.2, inplace=True))
+        sequence.append(conv_layer(chs[1], chs[1], neigh_orders[0]))
+        sequence.append(nn.BatchNorm1d(chs[1]))
+        sequence.append(nn.LeakyReLU(0.2, inplace=True))
+        sequence.append(conv_layer(chs[1], chs[1], neigh_orders[0]))
+        sequence.append(nn.BatchNorm1d(chs[1]))
+        sequence.append(nn.LeakyReLU(0.2, inplace=True))
+            
+        for l in range(1, len(chs)-1):
+            sequence.append(pool_layer(neigh_orders[l-1], 'mean'))
+            sequence.append(conv_layer(chs[l], chs[l+1], neigh_orders[l]))
+            sequence.append(nn.BatchNorm1d(chs[l+1]))
+            sequence.append(nn.LeakyReLU(0.2, inplace=True))
+            sequence.append(conv_layer(chs[l+1], chs[l+1], neigh_orders[l]))
+            sequence.append(nn.BatchNorm1d(chs[l+1]))
+            sequence.append(nn.LeakyReLU(0.2, inplace=True))
+
+        self.model = nn.Sequential(*sequence)    
+        self.fc =  nn.Sequential(
+                nn.Linear(chs[-1], out_ch)
+                )
+
+    def forward(self, x):
+        x = self.model(x)
+        x = torch.mean(x, 0, True)
+        x = self.fc(x)
+        return x
+
+
+
+class res_block(nn.Module):
+    def __init__(self, c_in, c_out, neigh_orders, first_in_block=False):
+        super(res_block, self).__init__()
+        
+        self.conv1 = onering_conv_layer(c_in, c_out, neigh_orders)
+        self.bn1 = nn.BatchNorm1d(c_out)
+        self.relu = nn.LeakyReLU(0.2)
+        self.conv2 = onering_conv_layer(c_out, c_out, neigh_orders)
+        self.bn2 = nn.BatchNorm1d(c_out)
+        self.first = first_in_block
+    
+    def forward(self, x):
+        res = x
+        
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        
+        x = self.conv2(x)
+        x = self.bn2(x)
+        
+        if self.first:
+            res = torch.cat((res,res),1)
+        x = x + res
+        x = self.relu(x)
+        
+        return x
+    
+    
+class ResNet(nn.Module):
+    def __init__(self, in_c, out_c):
+        super(ResNet, self).__init__()
+        neigh_orders_40962, neigh_orders_10242, neigh_orders_2562, neigh_orders_642, neigh_orders_162, neigh_orders_42, neigh_orders_12 = Get_neighs_order()
+        
+        self.conv1 =  onering_conv_layer(in_c, 64, neigh_orders_40962)
+        self.bn1 = nn.BatchNorm1d(64)
+        self.relu = nn.LeakyReLU(0.2)
+        
+        self.pool1 = pool_layer(neigh_orders_40962, 'max')
+        self.res1_1 = res_block(64, 64, neigh_orders_10242)
+        self.res1_2 = res_block(64, 64, neigh_orders_10242)
+        self.res1_3 = res_block(64, 64, neigh_orders_10242)
+        
+        self.pool2 = pool_layer(neigh_orders_10242, 'max')
+        self.res2_1 = res_block(64, 128, neigh_orders_2562, True)
+        self.res2_2 = res_block(128, 128, neigh_orders_2562)
+        self.res2_3 = res_block(128, 128, neigh_orders_2562)
+        
+        self.pool3 = pool_layer(neigh_orders_2562, 'max')
+        self.res3_1 = res_block(128, 256, neigh_orders_642, True)
+        self.res3_2 = res_block(256, 256, neigh_orders_642)
+        self.res3_3 = res_block(256, 256, neigh_orders_642)
+        
+        self.pool4 = pool_layer(neigh_orders_642, 'max')
+        self.res4_1 = res_block(256, 512, neigh_orders_162, True)
+        self.res4_2 = res_block(512, 512, neigh_orders_162)
+        self.res4_3 = res_block(512, 512, neigh_orders_162)
+                
+        self.pool5 = pool_layer(neigh_orders_162, 'max')
+        self.res5_1 = res_block(512, 1024, neigh_orders_42, True)
+        self.res5_2 = res_block(1024, 1024, neigh_orders_42)
+        self.res5_3 = res_block(1024, 1024, neigh_orders_42)
+        
+        self.fc = nn.Linear(1024, out_c)
+        self.out = nn.Sigmoid()
+        
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        
+        x = self.pool1(x)
+        x = self.res1_1(x)
+        x = self.res1_2(x)
+        x = self.res1_3(x)
+        
+        x = self.pool2(x)
+        x = self.res2_1(x)
+        x = self.res2_2(x)
+        x = self.res2_3(x)
+        
+        x = self.pool3(x)
+        x = self.res3_1(x)
+        x = self.res3_2(x)
+        x = self.res3_3(x)
+                
+        x = self.pool4(x)
+        x = self.res4_1(x)
+        x = self.res4_2(x)
+        x = self.res4_3(x)
+        
+        x = self.pool5(x)
+        x = self.res5_1(x)
+        x = self.res5_2(x)
+        x = self.res5_3(x)
+        
+        x = torch.mean(x, 0, True)
+        x = self.fc(x)
+        x = self.out(x)
+        return x
+
+
 #class Unet_2d(nn.Module):
 #    def __init__(self, in_ch, out_ch):
 #        super(Unet_2d, self).__init__()

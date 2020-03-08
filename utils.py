@@ -9,8 +9,6 @@ Created on Fri Jun 29 10:55:33 2018
 import scipy.io as sio 
 import numpy as np
 import glob
-import os
-from numpy import median
 from utils_vtk import read_vtk
 import math, multiprocessing
 
@@ -72,29 +70,23 @@ def get_upconv_index(order_path):
     return upconv_top_index, upconv_down_index
 
 
-def compute_weight():
-    folder = 'neigh_indices/90/raw'
-    files = sorted(glob.glob(os.path.join(folder, '*.label')))
+def get_upsample_order(n_vertex):
+    n_last = int((n_vertex+6)/4)
+    neigh_orders = get_neighs_order('neigh_indices/adj_mat_order_'+ str(n_vertex) +'_rotated_0.mat')
+    neigh_orders = neigh_orders.reshape(n_vertex, 7)
+    neigh_orders = neigh_orders[n_last:,:]
+    row, col = (neigh_orders < n_last).nonzero()
+    assert len(row) == (n_vertex - n_last)*2, "len(row) == (n_vertex - n_last)*2, error!"
     
-    labels = np.zeros((len(files),10242))
-    for i in range(len(files)):
-        file = files[i]
-        label = sio.loadmat(file)
-        label = label['label']    
-        label = np.squeeze(label)
-        label = label - 1
-        label = label.astype(np.float64)
-        labels[i,:] = label
-        
-    num = np.zeros(36)
-    for i in range(36):
-        num[i] = len(np.where(labels == i)[0])
-       
-    num = num/sum(num) 
-    num = median(num)/num
-    print(num)
-
-    return num
+    u, indices, counts = np.unique(row, return_index=True, return_counts=True)
+    assert len(u) == n_vertex - n_last, "len(u) == n_vertex - n_last, error"
+    assert u.min() == 0 and u.max() == n_vertex-n_last-1, "u.min() == 0 and u.max() == n_vertex-n_last-1, error"
+    assert (indices == np.asarray(list(range(n_vertex - n_last))) * 2).sum() == n_vertex - n_last, "(indices == np.asarray(list(range(n_vertex - n_last))) * 2).sum() == n_vertex - n_last, error"
+    assert (counts == 2).sum() == n_vertex - n_last, "(counts == 2).sum() == n_vertex - n_last, error"
+    
+    upsample_neighs_order = neigh_orders[row, col]
+    
+    return upsample_neighs_order  
 
 
 def get_par_36_to_fs_vec():

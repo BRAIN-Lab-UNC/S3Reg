@@ -77,7 +77,7 @@ def singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=7):
         inter_indices = np.array([top1_near_vertex_index[0][0], top1_near_vertex_index[0][0], top1_near_vertex_index[0][0]])
         return inter_indices, inter_weight
 
-    _, top7_near_vertex_index = tree.query(vertex[np.newaxis,:], k=k) 
+    _, top7_near_vertex_index = tree.query(vertex[np.newaxis,:], k=k)
     candi_faces = []
     for t in itertools.combinations(np.squeeze(top7_near_vertex_index), 3):
         tmp = np.asarray(t)  # get the indices of the potential candidate triangles
@@ -86,7 +86,7 @@ def singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=7):
     if candi_faces:
         candi_faces = np.asarray(candi_faces)
     else:
-        if k > 20:
+        if k > 25:
             print("cannot find candidate faces, top k shoulb be larger, function recursion, current k =", k)
         return singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=k+5)
 
@@ -116,7 +116,7 @@ def singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=7):
     index = np.argmin(tmp)
     
     if tmp[index] > 1e-10:
-        if k > 20:
+        if k > 25:
             print("candidate faces don't contain the correct one, top k shoulb be larger, function recursion, current k =", k)
         return singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=k+5)
 
@@ -180,11 +180,23 @@ def multiVertexInterpo(vertexs, vertices, tree, neigh_orders, feat):
     return feat_inter
     
 
-def resampleSphereSurf(vertices_fix, vertices_inter, feat, neigh_orders=None):
+def resampleStdSphereSurf(n_curr, n_next, feat, upsample_neighbors):
+    assert len(feat) == n_curr, "feat length not cosistent!"
+    assert n_next == n_curr*4-6, "n_next == n_curr*4-6, error"
+    
+    feat_inter = np.zeros((n_next, feat.shape[1]))
+    feat_inter[0:n_curr, :] = feat
+    feat_inter[n_curr:, :] = feat[upsample_neighbors].reshape(n_next-n_curr, 2, feat.shape[1]).mean(1)
+    
+    return feat_inter
+
+
+def resampleSphereSurf(vertices_fix, vertices_inter, feat, std=False, upsample_neighbors=None, neigh_orders=None):
     """
     vertices_fix: N*3, numpy array
     vertices_inter: unknown*3, numpy array, sphere to be interpolated
     feat: N*D, features to be interpolated
+    std: standard sphere interpolation, e.g., interpolate 10242 from 2562.
     """
 #    template = read_vtk('/media/fenqiang/DATA/unc/Data/registration/presentation/regis_sulc_2562_3d_smooth0p33_phiconsis1_3model/training_10242/MNBCP107842_593.lh.SphereSurf.Orig.sphere.resampled.642.DL.origin_3.phi_resampled.2562.moved.sucu_resampled.2562.DL.origin_3.phi_resampled.10242.moved.vtk')
 #    vertices_fix = template['vertices']
@@ -204,6 +216,10 @@ def resampleSphereSurf(vertices_fix, vertices_inter, feat, neigh_orders=None):
     
     if len(feat.shape) == 1:
         feat = feat[:,np.newaxis]
+        
+    if std:
+        assert upsample_neighbors is not None, " upsample_neighbors is None"
+        return resampleStdSphereSurf(len(vertices_fix), len(vertices_inter), feat, upsample_neighbors)
         
     if neigh_orders == None:
         neigh_orders = get_neighs_order('neigh_indices/adj_mat_order_'+ str(vertices_fix.shape[0]) +'_rotated_0.mat')
@@ -237,15 +253,14 @@ def resampleSphereSurf(vertices_fix, vertices_inter, feat, neigh_orders=None):
         
 
 def bilinear_interpolate(im, x, y):
+
+    x = np.clip(x, 0.0001, im.shape[1]-1.001)
+    y = np.clip(y, 0.0001, im.shape[1]-1.001)
+
     x0 = np.floor(x).astype(int)
     x1 = x0 + 1
     y0 = np.floor(y).astype(int)
     y1 = y0 + 1
-
-    x0 = np.clip(x0, 0, im.shape[1]-1);
-    x1 = np.clip(x1, 0, im.shape[1]-1);
-    y0 = np.clip(y0, 0, im.shape[0]-1);
-    y1 = np.clip(y1, 0, im.shape[0]-1);
 
     Ia = im[ y0, x0 ]
     Ib = im[ y1, x0 ]
@@ -262,7 +277,7 @@ def bilinear_interpolate(im, x, y):
         
 def bilinearResampleSphereSurf(vertices_inter, feat, bi_inter_40962, radius=1.0):
     """
-    assume vertices_fix are on the standard icosahedron discretized spheres
+    ONLY!! assume vertices_fix are on the standard icosahedron discretized spheres!!
     
     """
     inter_indices, inter_weights = bi_inter_40962
@@ -274,15 +289,20 @@ def bilinearResampleSphereSurf(vertices_inter, feat, bi_inter_40962, radius=1.0)
     img = np.sum(np.multiply((feat[inter_indices.flatten()]).reshape((inter_indices.shape[0], inter_indices.shape[1], feat.shape[1])), np.repeat(inter_weights[:,:, np.newaxis], feat.shape[1], axis=-1)), axis=1)
     img = img.reshape((width, width, feat.shape[1]))
     
+    vertices_inter[:,2] = np.clip(vertices_inter[:,2], -0.999999999, 0.999999999)
     beta = np.arccos(vertices_inter[:,2]/radius)
     row = beta/(np.pi/(width-1))
+    
     tmp = (vertices_inter[:,0] == 0).nonzero()[0]
-    vertices_inter[:,0][tmp] = 1e-10
+    vertices_inter[:,0][tmp] = 1e-15
+    
     alpha = np.arctan(vertices_inter[:,1]/vertices_inter[:,0])
-    tmp =  (vertices_inter[:,0] < 0).nonzero()[0]
+    tmp = (vertices_inter[:,0] < 0).nonzero()[0]
     alpha[tmp] = np.pi + alpha[tmp]
-    tmp =  np.intersect1d((vertices_inter[:,0] > 0).nonzero()[0], (vertices_inter[:,1] < 0).nonzero()[0])
-    alpha[tmp] = 2*np.pi + alpha[tmp]
+    
+    alpha = 2*np.pi + alpha
+    alpha = np.remainder(alpha, 2*np.pi)
+    
     col = alpha/(2*np.pi/(width-1))
     
     feat_inter = bilinear_interpolate(img, col, row)
