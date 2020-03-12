@@ -71,7 +71,7 @@ def isInTriangle(vertex, v0, v1, v2):
 
 def singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=7):
     
-    if k > 30:
+    if k > 20:
         _, top1_near_vertex_index = tree.query(vertex[np.newaxis,:], k=1)
         inter_weight = np.array([1,0,0])
         inter_indices = np.array([top1_near_vertex_index[0][0], top1_near_vertex_index[0][0], top1_near_vertex_index[0][0]])
@@ -86,7 +86,7 @@ def singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=7):
     if candi_faces:
         candi_faces = np.asarray(candi_faces)
     else:
-        if k > 25:
+        if k > 15:
             print("cannot find candidate faces, top k shoulb be larger, function recursion, current k =", k)
         return singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=k+5)
 
@@ -116,7 +116,7 @@ def singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=7):
     index = np.argmin(tmp)
     
     if tmp[index] > 1e-10:
-        if k > 25:
+        if k > 15:
             print("candidate faces don't contain the correct one, top k shoulb be larger, function recursion, current k =", k)
         return singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=k+5)
 
@@ -221,7 +221,7 @@ def resampleSphereSurf(vertices_fix, vertices_inter, feat, std=False, upsample_n
         assert upsample_neighbors is not None, " upsample_neighbors is None"
         return resampleStdSphereSurf(len(vertices_fix), len(vertices_inter), feat, upsample_neighbors)
         
-    if neigh_orders == None:
+    if neigh_orders is None:
         neigh_orders = get_neighs_order('neigh_indices/adj_mat_order_'+ str(vertices_fix.shape[0]) +'_rotated_0.mat')
     
     feat_inter = np.zeros((vertices_inter.shape[0], feat.shape[1]))
@@ -288,6 +288,35 @@ def bilinearResampleSphereSurf(vertices_inter, feat, bi_inter_40962, radius=1.0)
         
     img = np.sum(np.multiply((feat[inter_indices.flatten()]).reshape((inter_indices.shape[0], inter_indices.shape[1], feat.shape[1])), np.repeat(inter_weights[:,:, np.newaxis], feat.shape[1], axis=-1)), axis=1)
     img = img.reshape((width, width, feat.shape[1]))
+    
+    vertices_inter[:,2] = np.clip(vertices_inter[:,2], -0.999999999, 0.999999999)
+    beta = np.arccos(vertices_inter[:,2]/radius)
+    row = beta/(np.pi/(width-1))
+    
+    tmp = (vertices_inter[:,0] == 0).nonzero()[0]
+    vertices_inter[:,0][tmp] = 1e-15
+    
+    alpha = np.arctan(vertices_inter[:,1]/vertices_inter[:,0])
+    tmp = (vertices_inter[:,0] < 0).nonzero()[0]
+    alpha[tmp] = np.pi + alpha[tmp]
+    
+    alpha = 2*np.pi + alpha
+    alpha = np.remainder(alpha, 2*np.pi)
+    
+    col = alpha/(2*np.pi/(width-1))
+    
+    feat_inter = bilinear_interpolate(img, col, row)
+    
+    return feat_inter
+
+
+def bilinearResampleSphereSurf_img(vertices_inter, img, radius=1.0):
+    """
+    ONLY!! assume vertices_fix are on the standard icosahedron discretized spheres!!
+    
+    """
+     
+    width = img.shape[0]
     
     vertices_inter[:,2] = np.clip(vertices_inter[:,2], -0.999999999, 0.999999999)
     beta = np.arccos(vertices_inter[:,2]/radius)

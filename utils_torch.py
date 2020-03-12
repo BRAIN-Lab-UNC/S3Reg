@@ -233,8 +233,6 @@ def bilinearResampleSphereSurf_v2(vertices_inter, feat, bi_inter, radius=1.0):
     img = torch.sum(((feat[inter_indices.flatten()]).reshape(inter_indices.shape[0], inter_indices.shape[1], feat.shape[1])) * ((inter_weights.unsqueeze(2)).repeat(1,1,feat.shape[1])), 1)
     img = img.reshape(width, width, feat.shape[1])
     
-
-    
     return bilinearResampleSphereSurf(vertices_inter, img)
     
     

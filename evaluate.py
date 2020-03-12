@@ -34,8 +34,8 @@ def compute_dice(lbl1, lbl2):
         lbl1_indices = np.where(lbl1 == i)[0]
         lbl2_indices = np.where(lbl2 == i)[0]
         dice[i] = 2 * len(np.intersect1d(lbl1_indices, lbl2_indices))/(len(lbl1_indices) + len(lbl2_indices))
-    return dice.mean()
-
+#    return dice.mean()
+    return dice
 
 def evaluate(files):
     sulc = np.zeros((len(files), 163842))
@@ -79,7 +79,7 @@ def evaluate(files):
     print('mae_sulc mean, std:', mae_sulc.mean(), mae_sulc.std())
     print('mae_curv mean, std:', mae_curv.mean(), mae_curv.std())
     
-    dice = np.zeros((len(label), len(label)))
+    dice = np.zeros((len(label), len(label), 36))
     for i in range(len(label)):
         print(i)
         for j in range(len(label)): 

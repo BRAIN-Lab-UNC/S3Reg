@@ -1,0 +1,14 @@
+check_sphere_interpolation_algorithm.py
+ComputePatchInterpolationIndicesWeights.sh
+ForFigure.py
+neigh_indices/
+patch_inter/
+write_feature_to_freesurfer.m
+visited_indices_for_patch_on_longleaf.txt
+validate_vector_interpolation_on_sphere.m
+stn_demo.py
+pathdef.m
+longleaf_*
+SD_registration/*
+MappingThickness/*
+MSM/*
