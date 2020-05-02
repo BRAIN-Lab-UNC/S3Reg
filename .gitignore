@@ -1,7 +1,6 @@
 check_sphere_interpolation_algorithm.py
 ComputePatchInterpolationIndicesWeights.sh
 ForFigure.py
-neigh_indices/
 patch_inter/
 write_feature_to_freesurfer.m
 visited_indices_for_patch_on_longleaf.txt
