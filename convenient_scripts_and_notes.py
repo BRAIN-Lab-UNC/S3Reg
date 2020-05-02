@@ -689,37 +689,38 @@ for i in range(len(files)):
         
 ####################################################################
 """ compute ineterpolated indices and weights for fixed 40962 sphere to alpha beta image """
-i = 1
-shape = [512,512]
-n_vertex =10242
-rotated = 2
 
-sphere = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+ str(10242)+'.rotated_'+ str(rotated) +'.vtk') 
-vertices = sphere['vertices'].astype(np.float64)
-tree = KDTree(vertices, leaf_size=10)  # build kdtree
-faces = sphere['faces']
-faces = faces[:,1:]
-neigh_orders = get_neighs_order('neigh_indices/adj_mat_order_'+ str(n_vertex) +'_rotated_'+ str(rotated) +'.mat')
+shape = [256,256]
+n_vertex = 2562
+rotateds = [0,1,2]
 
-assert shape[0] == shape[1], "Shape should be square."
-
-inter_indices = np.zeros((shape[0]*shape[1],3)).astype(np.int64)
-inter_weights = np.zeros((shape[0]*shape[1],3))
-
-for p in range(shape[0]):
-    print(p)
-    beta = np.pi/(shape[1]-1)*p
-    for q in range(shape[1]):
-#        print(q)
-        alpha = 2*np.pi/(shape[0]-1)*q
-        x = 100 * np.sin(beta) * np.cos(alpha)
-        y = 100 * np.sin(beta) * np.sin(alpha)
-        z = 100 * np.cos(beta)
-        sphere_loc = np.array([x, y, z])
-        inter_indices[p*shape[0]+q,:], inter_weights[p*shape[0]+q,:] = singleVertexInterpo(sphere_loc, vertices, tree, neigh_orders)
- 
-np.save('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_indices_'+ str(n_vertex) +'_'+ str(rotated) +'.npy', inter_indices)
-np.save('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_weights_'+ str(n_vertex) +'_'+ str(rotated) +'.npy', inter_weights)
+for rotated in rotateds:
+    sphere = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+ str(n_vertex)+'.rotated_'+ str(rotated) +'.vtk') 
+    vertices = sphere['vertices'].astype(np.float64)
+    tree = KDTree(vertices, leaf_size=10)  # build kdtree
+    faces = sphere['faces']
+    faces = faces[:,1:]
+    neigh_orders = get_neighs_order('neigh_indices/adj_mat_order_'+ str(n_vertex) +'_rotated_'+ str(rotated) +'.mat')
+    
+    assert shape[0] == shape[1], "Shape should be square."
+    
+    inter_indices = np.zeros((shape[0]*shape[1],3)).astype(np.int64)
+    inter_weights = np.zeros((shape[0]*shape[1],3))
+    
+    for p in range(shape[0]):
+        print(p)
+        beta = np.pi/(shape[1]-1)*p
+        for q in range(shape[1]):
+    #        print(q)
+            alpha = 2*np.pi/(shape[0]-1)*q
+            x = 100 * np.sin(beta) * np.cos(alpha)
+            y = 100 * np.sin(beta) * np.sin(alpha)
+            z = 100 * np.cos(beta)
+            sphere_loc = np.array([x, y, z])
+            inter_indices[p*shape[0]+q,:], inter_weights[p*shape[0]+q,:] = singleVertexInterpo(sphere_loc, vertices, tree, neigh_orders)
+     
+    np.save('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_indices_'+ str(n_vertex) +'_'+ str(rotated) +'.npy', inter_indices)
+    np.save('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_weights_'+ str(n_vertex) +'_'+ str(rotated) +'.npy', inter_weights)
 
 
 ####################################################################

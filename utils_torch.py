@@ -12,7 +12,107 @@ from sklearn.neighbors import KDTree
 import numpy as np
 import math
 
-from utils import get_orthonormal_vectors
+from utils import get_orthonormal_vectors, get_z_weight
+
+
+def getOverlapIndex(n_vertex, device):
+    """
+    Compute the overlap indices' index for the 3 deforamtion field
+    """
+    z_weight_0 = get_z_weight(n_vertex, 0)
+    z_weight_0 = torch.from_numpy(z_weight_0.astype(np.float32)).to(device)
+    index_0_0 = (z_weight_0 == 1).nonzero()
+    index_0_1 = (z_weight_0 < 1).nonzero()
+    assert len(index_0_0) + len(index_0_1) == n_vertex, "error!"
+    z_weight_1 = get_z_weight(n_vertex, 1)
+    z_weight_1 = torch.from_numpy(z_weight_1.astype(np.float32)).to(device)
+    index_1_0 = (z_weight_1 == 1).nonzero()
+    index_1_1 = (z_weight_1 < 1).nonzero()
+    assert len(index_1_0) + len(index_1_1) == n_vertex, "error!"
+    z_weight_2 = get_z_weight(n_vertex, 2)
+    z_weight_2 = torch.from_numpy(z_weight_2.astype(np.float32)).to(device)
+    index_2_0 = (z_weight_2 == 1).nonzero()
+    index_2_1 = (z_weight_2 < 1).nonzero()
+    assert len(index_2_0) + len(index_2_1) == n_vertex, "error!"
+    
+    index_01 = np.intersect1d(index_0_0.detach().cpu().numpy(), index_1_0.detach().cpu().numpy())
+    index_02 = np.intersect1d(index_0_0.detach().cpu().numpy(), index_2_0.detach().cpu().numpy())
+    index_12 = np.intersect1d(index_1_0.detach().cpu().numpy(), index_2_0.detach().cpu().numpy())
+    index_01 = torch.from_numpy(index_01).to(device)
+    index_02 = torch.from_numpy(index_02).to(device)
+    index_12 = torch.from_numpy(index_12).to(device)
+    rot_mat_01 = torch.tensor([[np.cos(np.pi/2), 0, np.sin(np.pi/2)],
+                               [0., 1., 0.],
+                               [-np.sin(np.pi/2), 0, np.cos(np.pi/2)]], dtype=torch.float).to(device)
+    rot_mat_12 = torch.tensor([[1., 0., 0.],
+                               [0, np.cos(np.pi/2), -np.sin(np.pi/2)],
+                               [0, np.sin(np.pi/2), np.cos(np.pi/2)]], dtype=torch.float).to(device)
+    rot_mat_02 = torch.mm(rot_mat_12, rot_mat_01)
+    rot_mat_20 = torch.inverse(rot_mat_02)
+    
+    tmp = torch.cat((index_0_0, index_1_0, index_2_0))
+    tmp, indices = torch.sort(tmp.squeeze())
+    output, counts = torch.unique_consecutive(tmp, return_counts=True)
+    assert len(output) == n_vertex, "len(output) = n_vertex, error"
+    assert output[0] == 0, "output[0] = 0, error"
+    assert output[-1] == n_vertex-1, "output[-1] = n_vertex-1, error"
+    assert counts.max() == 3, "counts.max() == 3, error"
+    assert counts.min() == 2, "counts.min() == 3, error"
+    index_triple_computed = (counts == 3).nonzero().squeeze()
+    tmp = np.intersect1d(index_02.cpu().numpy(), index_triple_computed.cpu().numpy())
+    assert (tmp == index_triple_computed.cpu().numpy()).all(), "(tmp == index_triple_computed.cpu().numpy()).all(), error"
+    index_double_02 = torch.from_numpy(np.setdiff1d(index_02.cpu().numpy(), index_triple_computed.cpu().numpy())).to(device)
+    tmp = np.intersect1d(index_12.cpu().numpy(), index_triple_computed.cpu().numpy())
+    assert (tmp == index_triple_computed.cpu().numpy()).all(), "(tmp == index_triple_computed.cpu().numpy()).all(), error"
+    index_double_12 = torch.from_numpy(np.setdiff1d(index_12.cpu().numpy(), index_triple_computed.cpu().numpy())).to(device)
+    tmp = np.intersect1d(index_01.cpu().numpy(), index_triple_computed.cpu().numpy())
+    assert (tmp == index_triple_computed.cpu().numpy()).all(), "(tmp == index_triple_computed.cpu().numpy()).all(), error"
+    index_double_01 = torch.from_numpy(np.setdiff1d(index_01.cpu().numpy(), index_triple_computed.cpu().numpy())).to(device)
+    assert len(index_double_01) + len(index_double_12) + len(index_double_02) + len(index_triple_computed) == n_vertex, "double computed and three computed error"
+
+    return rot_mat_01, rot_mat_12, rot_mat_02, rot_mat_20, z_weight_0, z_weight_1, z_weight_2, index_01, index_12, index_02, index_0_0, index_1_0, index_2_0, index_double_02, index_double_12, index_double_01, index_triple_computed
+
+
+def convert2DTo3D(phi_2d, En, device):
+    """
+    phi_2d: N*2
+    En: N*6
+    """
+    phi_3d = torch.zeros(len(En), 3).to(device)
+    tmp = En * phi_2d.repeat(1,3)
+    phi_3d[:,0] = tmp[:,0] + tmp[:,1]
+    phi_3d[:,1] = tmp[:,2] + tmp[:,3]
+    phi_3d[:,2] = tmp[:,4] + tmp[:,5]
+    return phi_3d
+
+
+def get_bi_inter(n_vertex, device):
+    inter_indices_0 = np.load('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_indices_'+ str(n_vertex) +'_0.npy')
+    inter_indices_0 = torch.from_numpy(inter_indices_0.astype(np.int64)).to(device)
+    inter_weights_0 = np.load('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_weights_'+ str(n_vertex) +'_0.npy')
+    inter_weights_0 = torch.from_numpy(inter_weights_0.astype(np.float32)).to(device)
+    
+    inter_indices_1 = np.load('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_indices_'+ str(n_vertex) +'_1.npy')
+    inter_indices_1 = torch.from_numpy(inter_indices_1.astype(np.int64)).to(device)
+    inter_weights_1 = np.load('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_weights_'+ str(n_vertex) +'_1.npy')
+    inter_weights_1 = torch.from_numpy(inter_weights_1.astype(np.float32)).to(device)
+    
+    inter_indices_2 = np.load('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_indices_'+ str(n_vertex) +'_2.npy')
+    inter_indices_2 = torch.from_numpy(inter_indices_2.astype(np.int64)).to(device)
+    inter_weights_2 = np.load('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_weights_'+ str(n_vertex) +'_2.npy')
+    inter_weights_2 = torch.from_numpy(inter_weights_2.astype(np.float32)).to(device)
+    
+    return (inter_indices_0, inter_weights_0), (inter_indices_1, inter_weights_1), (inter_indices_2, inter_weights_2)
+
+
+def get_latlon_img(bi_inter, feat):
+    inter_indices, inter_weights = bi_inter
+    width = int(np.sqrt(len(inter_indices)))
+    img = torch.sum(((feat[inter_indices.flatten()]).reshape(inter_indices.shape[0], inter_indices.shape[1], feat.shape[1])) * ((inter_weights.unsqueeze(2)).repeat(1,1,feat.shape[1])), 1)
+    img = img.reshape(width, width, feat.shape[1])
+    
+    return img
+
 
 def getEn(n_vertex, device):
     En_0 = get_orthonormal_vectors(n_vertex, rotated=0)
@@ -51,10 +151,10 @@ def singleVertexInterpo_7(moving_warp_phi_3d_i, moving_warp_phi_3d_i_cpu, tree, 
     distance: the distance from each fiexd vertices to the interpolation position
     """
 
-    if k > 30:
-        top1_near_vertex_index = tree.query(moving_warp_phi_3d_i_cpu, k=1)[1].squeeze()
+    if k > 25:
+        top1_near_vertex_index = tree.query(moving_warp_phi_3d_i_cpu, k=1)[1].squeeze(0)
         inter_weight = torch.tensor([1.0, 0.0, 0.0])
-        inter_indices = torch.tensor([top1_near_vertex_index[0], top1_near_vertex_index[0], top1_near_vertex_index[0]])
+        inter_indices = np.asarray([top1_near_vertex_index[0], top1_near_vertex_index[0], top1_near_vertex_index[0]])
         return inter_indices, inter_weight
 
     top7_near_vertex_index = tree.query(moving_warp_phi_3d_i_cpu, k=k)[1].squeeze()
@@ -111,7 +211,7 @@ def singleVertexInterpo(moving_warp_phi_3d_i, moving_warp_phi_3d_i_cpu, tree, fi
         top3_near_vertex_1 = fixed_xyz[top3_near_vertex_index[1]]
         top3_near_vertex_2 = fixed_xyz[top3_near_vertex_index[2]]
         
-        # use formula p(x) = <p1,n>/<x,n> * x in spherical demons paper to calculate the intersection with the triangle face
+        # use formula p(x) = <p1,n>/<x,n> * x to calculate the intersection with the triangle face
         normal = torch.cross(top3_near_vertex_0-top3_near_vertex_2, top3_near_vertex_1-top3_near_vertex_2)
         moving_warp_phi_3d_i_proj = torch.dot(top3_near_vertex_0, normal)/torch.dot(moving_warp_phi_3d_i, normal) * moving_warp_phi_3d_i  # intersection points
 
@@ -133,29 +233,29 @@ def singleVertexInterpo(moving_warp_phi_3d_i, moving_warp_phi_3d_i_cpu, tree, fi
     return torch.mm(inter_weight.unsqueeze(0), fixed_sulc[inter_indices])
 
 
-def resampleSphereSurf(fixed_xyz, moving_warp_phi_3d, fixed_sulc, neigh_orders, device):
+def resampleSphereSurf(fixed_xyz, moving_xyz, fixed_sulc, neigh_orders, device):
     """
     Interpolate moving points using fixed points and its feature
     
-    moving_warp_phi_3d, N*3, torch cuda tensor, points to be interpolated
+    moving_xyz, N*3, torch cuda tensor, points to be interpolated
     fixed_xyz:          N*3, torch cuda tensor, known fixed sphere points
     fixed_sulc:         N*3, torch cuda tensor, known feature corresponding to fixed points
     device:             'torch.device('cpu')', or torch.device('cuda:0'), or ,torch.device('cuda:1')
     
     """
 #    if len(fixed_sulc.shape) == 1
-    fixed_inter = torch.zeros((len(moving_warp_phi_3d),fixed_sulc.shape[1]), dtype=torch.float32, device = device)
+    fixed_inter = torch.zeros((len(moving_xyz),fixed_sulc.shape[1]), dtype=torch.float32, device = device)
     
     # detach().cpu() cost ~0.2ms
-    moving_warp_phi_3d_cpu = moving_warp_phi_3d.detach().cpu().numpy()
+    moving_warp_phi_3d_cpu = moving_xyz.detach().cpu().numpy()
     fixed_xyz_cpu = fixed_xyz.detach().cpu().numpy()
     neigh_orders = neigh_orders.detach().cpu().numpy()
     
     tree = KDTree(fixed_xyz_cpu, leaf_size=10)  # build kdtree
     
     """ Single process, single thread: 163842:  s, 40962:  s, 10242: 7.6s, 2562:  s """
-    for i in range(len(moving_warp_phi_3d)):
-        fixed_inter[i] = singleVertexInterpo(moving_warp_phi_3d[i], moving_warp_phi_3d_cpu[i,:][np.newaxis,:], tree, fixed_xyz, neigh_orders, fixed_sulc)
+    for i in range(len(moving_xyz)):
+        fixed_inter[i] = singleVertexInterpo(moving_xyz[i], moving_warp_phi_3d_cpu[i,:][np.newaxis,:], tree, fixed_xyz, neigh_orders, fixed_sulc)
         
     return fixed_inter
     
@@ -164,8 +264,8 @@ def bilinear_interpolate(im, x, y):
     """
     im: 512*512*C
     """
-    x = torch.clamp(x, 0.001, im.shape[1]-1.001)
-    y = torch.clamp(y, 0.001, im.shape[1]-1.001)
+    x = torch.clamp(x, 0.0001, im.shape[1]-1.0001)
+    y = torch.clamp(y, 0.0001, im.shape[1]-1.0001)
     
     x0 = torch.floor(x)
     x1 = x0 + 1
@@ -185,7 +285,7 @@ def bilinear_interpolate(im, x, y):
     return wa.unsqueeze(1)*Ia + wb.unsqueeze(1)*Ib + wc.unsqueeze(1)*Ic + wd.unsqueeze(1)*Id
 
         
-def bilinearResampleSphereSurf(vertices_inter, img, radius=1.0):
+def bilinearResampleSphereSurfImg(vertices_inter, img, radius=1.0):
     """
     assume vertices_fix are on the standard icosahedron discretized spheres
     
@@ -223,7 +323,7 @@ def bilinearResampleSphereSurf(vertices_inter, img, radius=1.0):
     return feat_inter 
         
 
-def bilinearResampleSphereSurf_v2(vertices_inter, feat, bi_inter, radius=1.0):
+def bilinearResampleSphereSurf(vertices_inter, feat, bi_inter, radius=1.0):
     """
     ONLY!! assume vertices_fix are on the standard icosahedron discretized spheres!!
     
@@ -233,7 +333,7 @@ def bilinearResampleSphereSurf_v2(vertices_inter, feat, bi_inter, radius=1.0):
     img = torch.sum(((feat[inter_indices.flatten()]).reshape(inter_indices.shape[0], inter_indices.shape[1], feat.shape[1])) * ((inter_weights.unsqueeze(2)).repeat(1,1,feat.shape[1])), 1)
     img = img.reshape(width, width, feat.shape[1])
     
-    return bilinearResampleSphereSurf(vertices_inter, img)
+    return bilinearResampleSphereSurfImg(vertices_inter, img)
     
     
     

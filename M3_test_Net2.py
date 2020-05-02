@@ -15,9 +15,10 @@ import glob
 import math
 import time
 
-from utils import Get_neighs_order, get_z_weight, get_vertex_dis
+from utils import get_neighs_order, get_z_weight, get_vertex_dis, get_upsample_order
 from utils_vtk import read_vtk, write_vtk
 from utils_torch import resampleSphereSurf, bilinearResampleSphereSurf, bilinearResampleSphereSurf_v2, getEn
+from utils_interpolation import resampleSphereSurf as resampleSphereSurf_np
 
 from model import Unet
 
@@ -28,11 +29,13 @@ device = torch.device('cuda:1') # torch.device('cpu'), or torch.device('cuda:0')
 regis_feat = 'sulc' # 'sulc' or 'curv'
 num_composition = 6
 num_composition_deform = 6
-model_name = 'M3_2_regis_sulc_40962_3d_smooth10_phiconsis1_corr0p1'
+model_name = 'M3_2_regis_sulc_40962_3d_smooth15_phiconsis10_corr1'
 n_vertex = 40962
 bi = True
 norm_method = '2' # '1': use individual max min, '2': use fixed max min
+
 truncated = False
+max_disp = get_vertex_dis(n_vertex)/100.0 * 0.25
 
 ###########################################################
 
@@ -40,7 +43,6 @@ in_ch = 2   # one for sulc in fixed, one for sulc in moving
 out_ch = 2  # two components for tangent plane deformation vector 
 batch_size = 1
 data_for_test = 0.3
-max_disp = get_vertex_dis(n_vertex)/100.0 * 0.25
 
 ###########################################################
 """ split files, only need 18 month now"""
@@ -191,9 +193,20 @@ ns_vertex = np.array([163842,40962,10242,2562,642,162,42,12])
 level = 8 - np.nonzero(ns_vertex-n_vertex == 0)[0][0]
 n_res = level-1 if level<6 else 5
 
-neigh_orders = Get_neighs_order(0)[8-level]
+neigh_orders = get_neighs_order('neigh_indices/adj_mat_order_'+ str(n_vertex) +'_rotated_' + str(0) + '.mat')
 neigh_orders = torch.from_numpy(neigh_orders).to(device)
-assert len(neigh_orders) == n_vertex * 7, "neigh_orders wrong!"
+neigh_orders_642 = get_neighs_order('neigh_indices/adj_mat_order_'+ str(642) +'_rotated_' + str(0) + '.mat')
+neigh_orders_642 = torch.from_numpy(neigh_orders_642).to(device)
+neigh_orders_2562 = get_neighs_order('neigh_indices/adj_mat_order_'+ str(2562) +'_rotated_' + str(0) + '.mat')
+neigh_orders_2562 = torch.from_numpy(neigh_orders_2562).to(device)
+neigh_orders_10242 = get_neighs_order('neigh_indices/adj_mat_order_'+ str(10242) +'_rotated_' + str(0) + '.mat')
+neigh_orders_10242 = torch.from_numpy(neigh_orders_10242).to(device)
+
+upsample_neighbors_2562 = get_upsample_order(2562)
+upsample_neighbors_10242 = get_upsample_order(10242)
+upsample_neighbors_40962 = get_upsample_order(40962)
+upsample_neighbors_163842 = get_upsample_order(163842)
+
 
 En_0, En_1, En_2 = getEn(n_vertex, device)
 
@@ -287,6 +300,10 @@ def convert2DTo3D(phi_2d, En):
     return phi_3d
 
 
+#    dataiter = iter(train_dataloader)
+#    moving_0, file, ma, mi = dataiter.next()
+    
+
 def test(dataloader):
     
     model_0.eval()
@@ -331,6 +348,7 @@ def test(dataloader):
             phi_3d_orig = torch.transpose(torch.mm(rot_mat_20, torch.transpose(phi_3d,0,1)),0,1)
             
             # divide to small veloctiy field
+#            phi_3d = phi_3d_orig
             phi_3d = phi_3d_orig/math.pow(2,num_composition)
             print(torch.norm(phi_3d,dim=1).max().item())
 
@@ -341,7 +359,14 @@ def test(dataloader):
                 phi_3d_tmp[tmp] = phi_3d[tmp] / (torch.norm(phi_3d[tmp], dim=1, keepdim=True).repeat(1,3)) * max_disp
                 phi_3d = phi_3d_tmp
 		    
-            moving_warp_phi_3d = diffeomorp(fixed_xyz_0, phi_3d, num_composition=num_composition_deform, bi=bi, bi_inter=bi_inter_0, neigh_orders=neigh_orders, device=device)
+            moving_warp_phi_3d = diffeomorp(fixed_xyz_0[0:40962], phi_3d[0:40962], num_composition=num_composition_deform, bi=True, bi_inter=bi_inter_0, neigh_orders=neigh_orders, device=device)
+#            moving_warp_phi_3d = fixed_xyz_0[0:642] + phi_3d[0:642]
+#            moving_warp_phi_3d = moving_warp_phi_3d/(torch.norm(moving_warp_phi_3d, dim=1, keepdim=True).repeat(1,3))    
+#            moving_warp_phi_3d = resampleSphereSurf_np(fixed_xyz_0[0:642].detach().cpu().numpy(), fixed_xyz_0[0:2562].detach().cpu().numpy(), moving_warp_phi_3d.detach().cpu().numpy(), True, upsample_neighbors_2562)
+#            moving_warp_phi_3d = resampleSphereSurf_np(fixed_xyz_0[0:2562].detach().cpu().numpy(), fixed_xyz_0[0:10242].detach().cpu().numpy(), moving_warp_phi_3d, True, upsample_neighbors_10242)
+#            moving_warp_phi_3d = resampleSphereSurf_np(fixed_xyz_0[0:10242].detach().cpu().numpy(), fixed_xyz_0[0:40962].detach().cpu().numpy(), moving_warp_phi_3d, True, upsample_neighbors_40962)
+#            moving_warp_phi_3d = torch.from_numpy(moving_warp_phi_3d.astype(np.float32)).to(device)
+            
             diffe_deform = 1.0/torch.sum(fixed_xyz_0 * moving_warp_phi_3d, 1).unsqueeze(1) * moving_warp_phi_3d - fixed_xyz_0            
                     
             t1 = time.time()
@@ -363,7 +388,7 @@ def test(dataloader):
             origin = {'vertices': fixed_0['vertices'],
                       'faces': fixed_0['faces'],
                       'velocity': phi_3d.detach().cpu().numpy() * 100.0,
-                      'deformation': phi_3d_orig.detach().cpu().numpy() * 100.0,
+                      'phi_3d_642': torch.cat((phi_3d[0:642], torch.zeros(40962-642,3,device=device)),0).detach().cpu().numpy() * 100.0,                     
                       'diffe_deform': diffe_deform.detach().cpu().numpy() * 100.0,
                       regis_feat: tmp}
             write_vtk(origin, '/media/fenqiang/DATA/unc/Data/registration/presentation/' + model_name + '/' + file[0].split('/')[-1][:-3] + 'DL.origin_3.vtk')

@@ -313,8 +313,8 @@ def registerToAtlas(file_name, atlas_name):
     moving_sulc = (moving_sulc+11.5)/(13.65+11.5)
     moving_curv = (moving_curv+2.32)/(2.08+2.32)
     
-    t1 = time.time()
-    print("read surf: ", (t1-t0)*1000, "ms")
+#    t1 = time.time()
+#    print("read surf: ", (t1-t0)*1000, "ms")
     
     atlas = read_vtk(atlas_name)
     fixed_sulc = atlas['sulc']
@@ -323,41 +323,41 @@ def registerToAtlas(file_name, atlas_name):
     fixed_curv = (fixed_curv+2.32)/(2.08+2.32)
     fixed_xyz = atlas['vertices']/100.0
     
-    t2 = time.time()
-    print("read atlas: ", (t2-t1)*1000, "ms")
+#    t2 = time.time()
+#    print("read atlas: ", (t2-t1)*1000, "ms")
     
     
     # coarse registration on 642 vertices
-    total_deform = inferDeformation(model_642, En_642, merge_index_642, moving_sulc[0:642], fixed_sulc[0:642], device,  truncated=True)
+    total_deform = inferDeformation(model_642, En_642, merge_index_642, moving_sulc[0:642], fixed_sulc[0:642], device,  truncated=False)
     
-    total_deform = inferTotalDeform(model_642, En_642, merge_index_642, 642, 
-                                    total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, 
-                                    truncated=True, neigh_orders=neigh_orders_642)
+#    total_deform = inferTotalDeform(model_642, En_642, merge_index_642, 642, 
+#                                    total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, 
+#                                    truncated=True, neigh_orders=neigh_orders_642)
+#    
+#    total_deform = inferTotalDeform(model_642, En_642, merge_index_642, 642, 
+#                                    total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, 
+#                                    truncated=True, neigh_orders=neigh_orders_642)
     
-    total_deform = inferTotalDeform(model_642, En_642, merge_index_642, 642, 
-                                    total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, 
-                                    truncated=True, neigh_orders=neigh_orders_642)
     
-    
-    t8 = time.time()
-    print("642: ", (t8-t2)*1000, "ms")
-    
+#    t8 = time.time()
+#    print("642: ", (t8-t2)*1000, "ms")
+#    
     
     # reigs on 2562 vertices
     total_deform = inferTotalDeform(model_2562, En_2562, merge_index_2562, 2562, 
                                     total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, 
-                                    truncated=True, upsample_neighbors=upsample_neighbors_2562, neigh_orders=neigh_orders_2562)
+                                    truncated=False, upsample_neighbors=upsample_neighbors_2562, neigh_orders=neigh_orders_2562)
     
-    total_deform = inferTotalDeform(model_2562, En_2562, merge_index_2562, 2562, 
-                                    total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, 
-                                    truncated=True, upsample_neighbors=upsample_neighbors_2562, neigh_orders=neigh_orders_2562)
+#    total_deform = inferTotalDeform(model_2562, En_2562, merge_index_2562, 2562, 
+#                                    total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, 
+#                                    truncated=True, upsample_neighbors=upsample_neighbors_2562, neigh_orders=neigh_orders_2562)
 #        
 #    total_deform = inferTotalDeform(model_2562, En_2562, merge_index_2562, 2562, 
 #                                    total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, 
 #                                    truncated=True, upsample_neighbors=upsample_neighbors_2562, neigh_orders=neigh_orders_2562)
     
-    t9 = time.time()
-    print("2562: ", (t9-t8)*1000, "ms")
+#    t9 = time.time()
+#    print("2562: ", (t9-t8)*1000, "ms")
     
     
     # reigs on 10242 vertices
@@ -370,14 +370,14 @@ def registerToAtlas(file_name, atlas_name):
 #    total_deform = inferTotalDeform(model_10242, En_10242, merge_index_10242, 10242, 
 #                                    total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, 
 #                                    truncated=True, upsample_neighbors=upsample_neighbors_10242, neigh_orders=neigh_orders_10242, bi=True, bi_inter=bi_inter_10242)
-#    total_deform = inferTotalDeform(model_10242, En_10242, merge_index_10242, 10242, 
-#                                    total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, 
-#                                    truncated=False, upsample_neighbors=upsample_neighbors_10242,
-#                                    diffe=True, diffe_iter=3, bi=True, bi_inter=bi_inter_10242)
+    total_deform = inferTotalDeform(model_10242, En_10242, merge_index_10242, 10242, 
+                                    total_deform, fixed_xyz, moving_sulc, fixed_sulc, device, 
+                                    truncated=False, upsample_neighbors=upsample_neighbors_10242,
+                                    diffe=True, diffe_iter=2, bi=True, bi_inter=bi_inter_10242)
     
     
-    t10 = time.time()
-    print("10242: ", (t10-t9)*1000, "ms")
+#    t10 = time.time()
+#    print("10242: ", (t10-t9)*1000, "ms")
     
 #    total_deform = inferTotalDeform(model_40962, En_40962, merge_index_40962, 40962, 
 #                                    total_deform, fixed_xyz, moving_curv, fixed_curv, device, 
@@ -386,29 +386,29 @@ def registerToAtlas(file_name, atlas_name):
     # reigs on 40962 vertices
     total_deform = inferTotalDeform(model_40962, En_40962, merge_index_40962, 40962, 
                                     total_deform, fixed_xyz, moving_curv, fixed_curv, device, 
-                                    truncated=True, upsample_neighbors=upsample_neighbors_40962, neigh_orders=neigh_orders_40962,
-                                    diffe=False, diffe_iter=4, bi=True, bi_inter=bi_inter_40962)
-    total_deform = inferTotalDeform(model_40962, En_40962, merge_index_40962, 40962, 
-                                    total_deform, fixed_xyz, moving_curv, fixed_curv, device, 
-                                    truncated=True, upsample_neighbors=upsample_neighbors_40962, neigh_orders=neigh_orders_40962,
-                                    diffe=False, diffe_iter=4, bi=True, bi_inter=bi_inter_40962)
+                                    truncated=False, upsample_neighbors=upsample_neighbors_40962, neigh_orders=neigh_orders_40962,
+                                    diffe=True, diffe_iter=2, bi=True, bi_inter=bi_inter_40962)
+#    total_deform = inferTotalDeform(model_40962, En_40962, merge_index_40962, 40962, 
+#                                    total_deform, fixed_xyz, moving_curv, fixed_curv, device, 
+#                                    truncated=True, upsample_neighbors=upsample_neighbors_40962, neigh_orders=neigh_orders_40962,
+#                                    diffe=False, diffe_iter=4, bi=True, bi_inter=bi_inter_40962)
 #    total_deform = inferTotalDeform(model_40962, En_40962, merge_index_40962, 40962, 
 #                                    total_deform, fixed_xyz, moving_curv, fixed_curv, device, 
 #                                    truncated=True, upsample_neighbors=upsample_neighbors_40962, 
 #                                    diffe=False, diffe_iter=3, bi=True, bi_inter=bi_inter_40962)
 #    
-    
-    t3 = time.time()
-    print("40962: ", (t3-t10)*1000, "ms")
-    
+#    
+#    t3 = time.time()
+#    print("40962: ", (t3-t10)*1000, "ms")
+#    
     
     total_deform = resampleSphereSurf(fixed_xyz[0:40962,:], fixed_xyz, total_deform, std=True, upsample_neighbors=upsample_neighbors_163842)
     total_deform = projectOntoTangentPlane(fixed_xyz, total_deform)
     moving_warp_phi_163842 = fixed_xyz + total_deform
     moving_warp_phi_163842 = moving_warp_phi_163842/np.linalg.norm(moving_warp_phi_163842, axis=1)[:,np.newaxis]
     
-    t4 = time.time()
-    print("upsample to 163842: ", (t4-t3)*1000, "ms")
+#    t4 = time.time()
+#    print("upsample to 163842: ", (t4-t3)*1000, "ms")
     
     moved = {'vertices': moving_warp_phi_163842 * 100.0,
              'faces': atlas['faces'],
@@ -416,16 +416,16 @@ def registerToAtlas(file_name, atlas_name):
              'sulc': moving_sulc * (13.65+11.5) - 11.5}
     if 'par_vec' in surf_163842.keys():
         moved['par_vec'] = surf_163842['par_vec']
-#    write_vtk(moved, file_name[:-3]+'moved.vtk')
-    write_vtk(moved, '/home/fenqiang/test.vtk')
+    write_vtk(moved, file_name[:-3]+'moved.vtk')
+#    write_vtk(moved, '/home/fenqiang/test.vtk')
     
     t5 = time.time()
-    print("write: ", (t5-t4)*1000, "ms")
+#    print("write: ", (t5-t4)*1000, "ms")
     
     print("total: ", (t5-t0)*1000, "ms")
     
-#    surf_163842['deformation'] = total_deform * 100.0
-#    write_vtk(surf_163842, file_name[:-3]+'deform.vtk')
+    surf_163842['deformation'] = total_deform * 100.0
+    write_vtk(surf_163842, file_name[:-3]+'deform.vtk')
 #     
 #    moved_resample_sulc_curv = resampleSphereSurf(moving_warp_phi_163842, fixed_xyz, np.hstack((moved['sulc'][:,np.newaxis], moved['curv'][:,np.newaxis])))
 #    moved_resample = {'vertices': atlas['vertices'],
@@ -437,7 +437,7 @@ def registerToAtlas(file_name, atlas_name):
 #        moved_resample['par_vec'] = resample_lbl
 #    write_vtk(moved_resample, file_name[:-3]+'moved.resampled.163842.vtk')
 #    
-    return (t5-t1)
+    return (t5-t0)
   
 
 #if __name__ == "__main__":    

@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Tue Mar  3 12:44:31 2020
+Created on Mon Apr 27 03:44:09 2020
 
 @author: fenqiang
 """
-
 
 import torch
 
@@ -16,9 +15,9 @@ import math
 
 from utils import get_neighs_order, get_z_weight, get_vertex_dis
 from utils_vtk import read_vtk
-from utils_torch import resampleSphereSurf, bilinearResampleSphereSurf, bilinearResampleSphereSurf_v2, getEn
-from tensorboardX import SummaryWriter
-writer = SummaryWriter('log/M3_2')
+from utils_torch import resampleSphereSurf, bilinearResampleSphereSurfImg, bilinearResampleSphereSurf, getEn, get_bi_inter, get_latlon_img, convert2DTo3D, getOverlapIndex
+from torch.utils.tensorboard import SummaryWriter
+writer = SummaryWriter('log/NAMIC')
 
 from model import Unet
 
@@ -27,34 +26,41 @@ from model import Unet
 
 device = torch.device('cuda:0') # torch.device('cpu'), or torch.device('cuda:0')
 learning_rate = 0.001
-weight_corr = 0.5
-weight_smooth = 20
+weight_corr = 4.0
+weight_smooth = 45.0
 weight_l2 = 10.0
 weight_l1 = 0.0
-weight_phi_consis = 1.2
-regis_feat = 'sulc' # 'sulc' or 'curv'
-num_composition = 6
+weight_phi_consis = 10.0
+regis_feat = 'curv' # 'sulc' or 'curv'
 
 norm_method = '2' # '1': use individual max min, '2': use fixed max min
 n_vertex = 40962
+diffe = True
 bi = True
+num_composition = 6
 
 truncated = False
-max_disp = get_vertex_dis(n_vertex)/100.0 * 0.3
+max_disp = get_vertex_dis(n_vertex)/100.0 * 0.2
 
 ###########################################################
 
 in_ch = 2   # one for fixed sulc, one for moving sulc
 out_ch = 2  # two components for tangent plane deformation vector 
 batch_size = 1
-data_for_test = 0.3
-
+data_for_test = 0.2
+initial = 1.
+if n_vertex == 642:
+    initial = 1.0
 
 ###########################################################
-""" split files, only need 18 month now"""
 
-files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/data/preprocessed_npy/*/*.lh.SphereSurf.Orig.sphere.resampled.'+str(n_vertex)+'.npy'))
-files = [x for x in files if float(x.split('/')[-1].split('_')[1].split('.')[0]) >=450 and float(x.split('/')[-1].split('_')[1].split('.')[0]) <= 630]
+#files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/data/preprocessed_npy/*/*.lh.SphereSurf.Orig.sphere.resampled.'+str(n_vertex)+'.npy'))
+#files = [x for x in files if float(x.split('/')[-1].split('_')[1].split('.')[0]) >=450 and float(x.split('/')[-1].split('_')[1].split('.')[0]) <= 630]
+
+# files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/DL_reg/sub*/sub*.lh.SphereSurf.Orig.resampled.'+ str(n_vertex) + '.npy'))
+# files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/results/M3_regis_sulc_642_nondiffe_smooth15_phiconsis4_corr4/training_2562/*.lh.SphereSurf.Orig.resampled.642.DL.moved_3.upto2562.resampled.2562.npy'))
+# files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/results/M3_regis_sulc_2562_nondiffe_biTrue_smooth20_phiconsis5_corr4/training_10242/*.lh.SphereSurf.Orig.resampled.642.DL.moved_3.upto2562.resampled.2562.DL.moved_3.upto10242.resampled.10242.npy'))
+files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/results/M3_regis_sulc_10242_nondiffe_biTrue_smooth20_phiconsis10_corr4/training_40962/*.lh.SphereSurf.Orig.resampled.642.DL.moved_3.upto2562.resampled.2562.DL.moved_3.upto10242.resampled.10242.DL.moved_3.upto40962.resampled.40962.npy'))
 
 test_files = [ files[x] for x in range(int(len(files)*data_for_test)) ]
 train_files = [ files[x] for x in range(int(len(files)*data_for_test), len(files)) ]
@@ -62,94 +68,8 @@ train_files = [ files[x] for x in range(int(len(files)*data_for_test), len(files
 ###########################################################
 """ load fixed/atlas surface, smooth filter, global parameter pre-defined """
 
-def get_bi_inter(n_vertex, device):
-    inter_indices_0 = np.load('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_indices_'+ str(n_vertex) +'_0.npy')
-    inter_indices_0 = torch.from_numpy(inter_indices_0.astype(np.int64)).to(device)
-    inter_weights_0 = np.load('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_weights_'+ str(n_vertex) +'_0.npy')
-    inter_weights_0 = torch.from_numpy(inter_weights_0.astype(np.float32)).to(device)
-    
-    inter_indices_1 = np.load('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_indices_'+ str(n_vertex) +'_1.npy')
-    inter_indices_1 = torch.from_numpy(inter_indices_1.astype(np.int64)).to(device)
-    inter_weights_1 = np.load('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_weights_'+ str(n_vertex) +'_1.npy')
-    inter_weights_1 = torch.from_numpy(inter_weights_1.astype(np.float32)).to(device)
-    
-    inter_indices_2 = np.load('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_indices_'+ str(n_vertex) +'_2.npy')
-    inter_indices_2 = torch.from_numpy(inter_indices_2.astype(np.int64)).to(device)
-    inter_weights_2 = np.load('/media/fenqiang/DATA/unc/Data/registration/scripts/neigh_indices/img_weights_'+ str(n_vertex) +'_2.npy')
-    inter_weights_2 = torch.from_numpy(inter_weights_2.astype(np.float32)).to(device)
-    
-    return (inter_indices_0, inter_weights_0), (inter_indices_1, inter_weights_1), (inter_indices_2, inter_weights_2)
-
-
-def get_latlon_img(bi_inter, feat):
-    inter_indices, inter_weights = bi_inter
-    width = int(np.sqrt(len(inter_indices)))
-    img = torch.sum(((feat[inter_indices.flatten()]).reshape(inter_indices.shape[0], inter_indices.shape[1], feat.shape[1])) * ((inter_weights.unsqueeze(2)).repeat(1,1,feat.shape[1])), 1)
-    img = img.reshape(width, width, feat.shape[1])
-    
-    return img
-
-
-def getOverlapIndex(n_vertex, device):
-    """
-    Compute the overlap indices' index for the 3 deforamtion field
-    """
-    z_weight_0 = get_z_weight(n_vertex, 0)
-    z_weight_0 = torch.from_numpy(z_weight_0.astype(np.float32)).cuda(device)
-    index_0_0 = (z_weight_0 == 1).nonzero()
-    index_0_1 = (z_weight_0 < 1).nonzero()
-    assert len(index_0_0) + len(index_0_1) == n_vertex, "error!"
-    z_weight_1 = get_z_weight(n_vertex, 1)
-    z_weight_1 = torch.from_numpy(z_weight_1.astype(np.float32)).cuda(device)
-    index_1_0 = (z_weight_1 == 1).nonzero()
-    index_1_1 = (z_weight_1 < 1).nonzero()
-    assert len(index_1_0) + len(index_1_1) == n_vertex, "error!"
-    z_weight_2 = get_z_weight(n_vertex, 2)
-    z_weight_2 = torch.from_numpy(z_weight_2.astype(np.float32)).cuda(device)
-    index_2_0 = (z_weight_2 == 1).nonzero()
-    index_2_1 = (z_weight_2 < 1).nonzero()
-    assert len(index_2_0) + len(index_2_1) == n_vertex, "error!"
-    
-    index_01 = np.intersect1d(index_0_0.detach().cpu().numpy(), index_1_0.detach().cpu().numpy())
-    index_02 = np.intersect1d(index_0_0.detach().cpu().numpy(), index_2_0.detach().cpu().numpy())
-    index_12 = np.intersect1d(index_1_0.detach().cpu().numpy(), index_2_0.detach().cpu().numpy())
-    index_01 = torch.from_numpy(index_01).cuda(device)
-    index_02 = torch.from_numpy(index_02).cuda(device)
-    index_12 = torch.from_numpy(index_12).cuda(device)
-    rot_mat_01 = torch.tensor([[np.cos(np.pi/2), 0, np.sin(np.pi/2)],
-                               [0., 1., 0.],
-                               [-np.sin(np.pi/2), 0, np.cos(np.pi/2)]]).cuda(device)
-    rot_mat_12 = torch.tensor([[1., 0., 0.],
-                               [0, np.cos(np.pi/2), -np.sin(np.pi/2)],
-                               [0, np.sin(np.pi/2), np.cos(np.pi/2)]]).cuda(device)
-    rot_mat_02 = torch.mm(rot_mat_12, rot_mat_01)
-    rot_mat_20 = torch.inverse(rot_mat_02)
-    
-    tmp = torch.cat((index_0_0, index_1_0, index_2_0))
-    tmp, indices = torch.sort(tmp.squeeze())
-    output, counts = torch.unique_consecutive(tmp, return_counts=True)
-    assert len(output) == n_vertex, "len(output) = n_vertex, error"
-    assert output[0] == 0, "output[0] = 0, error"
-    assert output[-1] == n_vertex-1, "output[-1] = n_vertex-1, error"
-    assert counts.max() == 3, "counts.max() == 3, error"
-    assert counts.min() == 2, "counts.min() == 3, error"
-    index_triple_computed = (counts == 3).nonzero().squeeze()
-    tmp = np.intersect1d(index_02.cpu().numpy(), index_triple_computed.cpu().numpy())
-    assert (tmp == index_triple_computed.cpu().numpy()).all(), "(tmp == index_triple_computed.cpu().numpy()).all(), error"
-    index_double_02 = torch.from_numpy(np.setdiff1d(index_02.cpu().numpy(), index_triple_computed.cpu().numpy())).cuda(device)
-    tmp = np.intersect1d(index_12.cpu().numpy(), index_triple_computed.cpu().numpy())
-    assert (tmp == index_triple_computed.cpu().numpy()).all(), "(tmp == index_triple_computed.cpu().numpy()).all(), error"
-    index_double_12 = torch.from_numpy(np.setdiff1d(index_12.cpu().numpy(), index_triple_computed.cpu().numpy())).cuda(device)
-    tmp = np.intersect1d(index_01.cpu().numpy(), index_triple_computed.cpu().numpy())
-    assert (tmp == index_triple_computed.cpu().numpy()).all(), "(tmp == index_triple_computed.cpu().numpy()).all(), error"
-    index_double_01 = torch.from_numpy(np.setdiff1d(index_01.cpu().numpy(), index_triple_computed.cpu().numpy())).cuda(device)
-    assert len(index_double_01) + len(index_double_12) + len(index_double_02) + len(index_triple_computed) == n_vertex, "double computed and three computed error"
-
-    return rot_mat_01, rot_mat_12, rot_mat_02, rot_mat_20, z_weight_0, z_weight_1, z_weight_2, index_01, index_12, index_02, index_0_0, index_1_0, index_2_0, index_double_02, index_double_12, index_double_01, index_triple_computed
-
-
 def get_atlas(n_vertex, regis_feat, norm_method, device):
-    fixed_0 = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+str(n_vertex)+'.rotated_0.vtk')
+    fixed_0 = read_vtk('/media/fenqiang/DATA/unc/Data/registration/NAMIC/atlas_FS/lh.sphere.'+str(n_vertex)+'.rotated_0.norm.vtk')
     
     if regis_feat == 'sulc':
         fixed_sulc = fixed_0['sulc']
@@ -159,7 +79,7 @@ def get_atlas(n_vertex, regis_feat, norm_method, device):
         raise NotImplementedError('feat should be curv or sulc.')
         
     if norm_method == '1':
-        fixed_sulc = (fixed_sulc - fixed_sulc.min())/(fixed_sulc.max()-fixed_sulc.min()) * 2. - 1.
+        fixed_sulc = (fixed_sulc - fixed_sulc.min())/(fixed_sulc.max()-fixed_sulc.min()) * 2. 
     elif norm_method == '2':
         if regis_feat == 'sulc':
             fixed_sulc = (fixed_sulc + 11.5)/(13.65+11.5)
@@ -174,11 +94,11 @@ def get_atlas(n_vertex, regis_feat, norm_method, device):
     fixed_xyz_0 = fixed_0['vertices']/100.0  # fixed spherical coordinate
     fixed_xyz_0 = torch.from_numpy(fixed_xyz_0.astype(np.float32)).cuda(device)
     
-    fixed_1 = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+str(n_vertex)+'.rotated_1.vtk')
+    fixed_1 = read_vtk('/media/fenqiang/DATA/unc/Data/registration/NAMIC/atlas_FS/lh.sphere.'+str(n_vertex)+'.rotated_1.norm.vtk')
     fixed_xyz_1 = fixed_1['vertices']/100.0  # fixed spherical coordinate
     fixed_xyz_1 = torch.from_numpy(fixed_xyz_1.astype(np.float32)).cuda(device)
     
-    fixed_2 = read_vtk('/media/fenqiang/DATA/unc/Data/Template/Atlas-20200107-newsulc/18/18.lh.SphereSurf.'+str(n_vertex)+'.rotated_2.vtk')
+    fixed_2 = read_vtk('/media/fenqiang/DATA/unc/Data/registration/NAMIC/atlas_FS/lh.sphere.'+str(n_vertex)+'.rotated_2.norm.vtk')
     fixed_xyz_2 = fixed_2['vertices']/100.0  # fixed spherical coordinate
     fixed_xyz_2 = torch.from_numpy(fixed_xyz_2.astype(np.float32)).cuda(device)
     
@@ -198,20 +118,22 @@ n_res = level-1 if level<6 else 5
 
 neigh_orders = get_neighs_order('neigh_indices/adj_mat_order_'+ str(n_vertex) +'_rotated_' + str(0) + '.mat')
 neigh_orders = torch.from_numpy(neigh_orders).to(device)
-neigh_orders_642 = get_neighs_order('neigh_indices/adj_mat_order_'+ str(642) +'_rotated_' + str(0) + '.mat')
-neigh_orders_642 = torch.from_numpy(neigh_orders_642).to(device)
-neigh_orders_2562 = get_neighs_order('neigh_indices/adj_mat_order_'+ str(2562) +'_rotated_' + str(0) + '.mat')
-neigh_orders_2562 = torch.from_numpy(neigh_orders_2562).to(device)
 
 En_0, En_1, En_2 = getEn(n_vertex, device)
 
 rot_mat_01, rot_mat_12, rot_mat_02, rot_mat_20, z_weight_0, z_weight_1, z_weight_2, index_01, index_12, index_02, index_0_0, index_1_0, index_2_0, index_double_02, index_double_12, index_double_01, index_triple_computed = getOverlapIndex(n_vertex, device)
 merge_index = getOverlapIndex(n_vertex, device)
-merge_index_642 = getOverlapIndex(642, device)
-bi_inter_0, bi_inter_1, bi_inter_2 = get_bi_inter(n_vertex, device)
-img0 = get_latlon_img(bi_inter_0, fixed_sulc)
-img1 = get_latlon_img(bi_inter_1, fixed_sulc)
-img2 = get_latlon_img(bi_inter_2, fixed_sulc)
+#merge_index_642 = getOverlapIndex(642, device)
+
+if bi:
+    bi_inter_0, bi_inter_1, bi_inter_2 = get_bi_inter(n_vertex, device)
+    img0 = get_latlon_img(bi_inter_0, fixed_sulc)
+    img1 = get_latlon_img(bi_inter_1, fixed_sulc)
+    img2 = get_latlon_img(bi_inter_2, fixed_sulc)
+else:
+    bi_inter_0 = None
+    bi_inter_1 = None
+    bi_inter_2 = None
 
 #img0 = torch.transpose(img0, 0, 2).transpose(1, 2).unsqueeze(0)
 #img1 = torch.transpose(img1, 0, 2).transpose(1, 2).unsqueeze(0)
@@ -236,7 +158,7 @@ class BrainSphere(torch.utils.data.Dataset):
             sulc = data[:,0]
             
         if self.norm_method == '1':
-            sulc = (sulc - sulc.min())/(sulc.max()-sulc.min()) * 2. - 1.
+            sulc = (sulc - sulc.min())/(sulc.max()-sulc.min()) * 2. 
         else:
             if self.regis_feat == 'sulc':
                 sulc = (sulc + 11.5)/(13.65+11.5)
@@ -288,7 +210,7 @@ def diffeomorp(fixed_xyz, phi_3d, num_composition=6, bi=False, bi_inter=None, ne
     # compute exp
     for i in range(num_composition):
         if bi:
-            warped_vertices = bilinearResampleSphereSurf_v2(warped_vertices, warped_vertices.clone(), bi_inter)
+            warped_vertices = bilinearResampleSphereSurf(warped_vertices, warped_vertices.clone(), bi_inter)
         else:
             warped_vertices = resampleSphereSurf(fixed_xyz, warped_vertices, warped_vertices, neigh_orders, device)
         
@@ -297,17 +219,6 @@ def diffeomorp(fixed_xyz, phi_3d, num_composition=6, bi=False, bi_inter=None, ne
     return warped_vertices
 
 
-def convert2DTo3D(phi_2d, En):
-    """
-    phi_2d: N*2
-    En: N*6
-    """
-    phi_3d = torch.zeros(len(En), 3).to(device)
-    tmp = En * phi_2d.repeat(1,3)
-    phi_3d[:,0] = tmp[:,0] + tmp[:,1]
-    phi_3d[:,1] = tmp[:,2] + tmp[:,3]
-    phi_3d[:,2] = tmp[:,4] + tmp[:,5]
-    return phi_3d
 
 
 def multi_level_loss(n_vertex, fixed_sulc, moving_sulc, fixed_xyz, phi_3d, num_composition, neigh_orders, merge_index, phi_3d_0_to_1, phi_3d_1_orig, phi_3d_1_to_2, phi_3d_2_orig, phi_3d_0_to_2, phi_3d_orig, device, bi=False, img0=None, bi_inter=None):
@@ -380,13 +291,13 @@ for epoch in range(80):
         data = torch.cat((moving, fixed_sulc), 1)
         
         # tangent vector field phi
-        phi_2d_0_orig = model_0(data)/5.0
-        phi_2d_1_orig = model_1(data)/5.0
-        phi_2d_2_orig = model_2(data)/5.0
+        phi_2d_0_orig = model_0(data)/initial
+        phi_2d_1_orig = model_1(data)/initial
+        phi_2d_2_orig = model_2(data)/initial
         
-        phi_3d_0_orig = convert2DTo3D(phi_2d_0_orig, En_0)
-        phi_3d_1_orig = convert2DTo3D(phi_2d_1_orig, En_1)
-        phi_3d_2_orig = convert2DTo3D(phi_2d_2_orig, En_2)
+        phi_3d_0_orig = convert2DTo3D(phi_2d_0_orig, En_0, device)
+        phi_3d_1_orig = convert2DTo3D(phi_2d_1_orig, En_1, device)
+        phi_3d_2_orig = convert2DTo3D(phi_2d_2_orig, En_2, device)
         
         """ deformation consistency  """
         phi_3d_0_to_1 = torch.mm(rot_mat_01, torch.transpose(phi_3d_0_orig, 0, 1))
@@ -396,33 +307,111 @@ for epoch in range(80):
         phi_3d_0_to_2 = torch.mm(rot_mat_02, torch.transpose(phi_3d_0_orig, 0, 1))
         phi_3d_0_to_2 = torch.transpose(phi_3d_0_to_2, 0, 1)
         
-        # merge 
+        """ first merge """
         phi_3d = torch.zeros(len(En_0), 3).cuda(device)
         phi_3d[index_double_02] = (phi_3d_0_to_2[index_double_02] + phi_3d_2_orig[index_double_02])/2.0
         phi_3d[index_double_12] = (phi_3d_1_to_2[index_double_12] + phi_3d_2_orig[index_double_12])/2.0
         tmp = (phi_3d_0_to_1[index_double_01] + phi_3d_1_orig[index_double_01])/2.0
         phi_3d[index_double_01] = torch.transpose(torch.mm(rot_mat_12, torch.transpose(tmp,0,1)), 0, 1)
         phi_3d[index_triple_computed] = (phi_3d_1_to_2[index_triple_computed] + phi_3d_2_orig[index_triple_computed] + phi_3d_0_to_2[index_triple_computed])/3.0
-        phi_3d = torch.transpose(torch.mm(rot_mat_20, torch.transpose(phi_3d,0,1)),0,1)
+        phi_3d_orig = torch.transpose(torch.mm(rot_mat_20, torch.transpose(phi_3d,0,1)),0,1)
+        
+       
+        if diffe:
+            """ diffeomorphism  """
+            # divide to small veloctiy field
+            phi_3d = phi_3d_orig/math.pow(2,num_composition)
+            print(torch.norm(phi_3d,dim=1).max().item())
+            moving_warp_phi_3d = diffeomorp(fixed_xyz_0, phi_3d, num_composition=num_composition, bi=bi, bi_inter=bi_inter_0, neigh_orders=neigh_orders, device=device)
+        
+        else:
+            """ Non diffeomorphism  """
+            # print(torch.norm(phi_3d_orig,dim=1).max().item())
+            moving_warp_phi_3d = fixed_xyz_0 + phi_3d_orig
+            moving_warp_phi_3d = moving_warp_phi_3d/(torch.norm(moving_warp_phi_3d, dim=1, keepdim=True).repeat(1,3))
+        
         
         # truncate
-        if truncated:
-            tmp = torch.norm(phi_3d, dim=1) > max_disp
-            phi_3d_tmp = phi_3d.clone()
-            phi_3d_tmp[tmp] = phi_3d[tmp] / (torch.norm(phi_3d[tmp], dim=1, keepdim=True).repeat(1,3)) * max_disp
-            phi_3d = phi_3d_tmp
+        # if truncated:
+        #     tmp = torch.norm(phi_3d, dim=1) > max_disp
+        #     phi_3d_tmp = phi_3d.clone()
+        #     phi_3d_tmp[tmp] = phi_3d[tmp] / (torch.norm(phi_3d[tmp], dim=1, keepdim=True).repeat(1,3)) * max_disp
+        #     phi_3d = phi_3d_tmp
         
 
+        """ compute interpolation values on fixed surface """
+        if bi:
+            fixed_inter = bilinearResampleSphereSurfImg(moving_warp_phi_3d, img0)
+        else:
+            fixed_inter = resampleSphereSurf(fixed_xyz_0, moving_warp_phi_3d, fixed_sulc, neigh_orders, device)
+        
+        
+        """ after merge """
+        # """ warp moving image """
+        # moving_warp_phi_3d_0 = fixed_xyz_0 + phi_3d_0_orig
+        # moving_warp_phi_3d_0 = moving_warp_phi_3d_0/(torch.norm(moving_warp_phi_3d_0, dim=1, keepdim=True).repeat(1,3)) # normalize the deformed vertices onto the sphere
+        # moving_warp_phi_3d_1 = fixed_xyz_1 + phi_3d_1_orig
+        # moving_warp_phi_3d_1 = moving_warp_phi_3d_1/(torch.norm(moving_warp_phi_3d_1, dim=1, keepdim=True).repeat(1,3)) # normalize the deformed vertices onto the sphere
+        # moving_warp_phi_3d_2 = fixed_xyz_2 + phi_3d_2_orig
+        # moving_warp_phi_3d_2 = moving_warp_phi_3d_2/(torch.norm(moving_warp_phi_3d_2, dim=1, keepdim=True).repeat(1,3)) # normalize the deformed vertices onto the sphere
+        
+        # """ compute interpolation values on fixed surface """
+        # if bi:
+        #     fixed_inter_0 = bilinearResampleSphereSurfImg(moving_warp_phi_3d_0, img0)
+        #     fixed_inter_1 = bilinearResampleSphereSurfImg(moving_warp_phi_3d_1, img1)
+        #     fixed_inter_2 = bilinearResampleSphereSurfImg(moving_warp_phi_3d_2, img2)
+        # else:
+        #     fixed_inter_0 = resampleSphereSurf(fixed_xyz_0, moving_warp_phi_3d_0, fixed_sulc, neigh_orders, device)
+        #     fixed_inter_1 = resampleSphereSurf(fixed_xyz_1, moving_warp_phi_3d_1, fixed_sulc, neigh_orders, device)
+        #     fixed_inter_2 = resampleSphereSurf(fixed_xyz_2, moving_warp_phi_3d_2, fixed_sulc, neigh_orders, device)
+        
+        # loss_corr = 1 - ((fixed_inter_0[index_0_0.squeeze()] - fixed_inter_0[index_0_0.squeeze()].mean()) * (moving[index_0_0.squeeze()] - moving[index_0_0.squeeze()].mean())).mean() / fixed_inter_0[index_0_0.squeeze()].std() / moving[index_0_0.squeeze()].std() + \
+        #             1 - ((fixed_inter_1[index_1_0.squeeze()] - fixed_inter_1[index_1_0.squeeze()].mean()) * (moving[index_1_0.squeeze()] - moving[index_1_0.squeeze()].mean())).mean() / fixed_inter_1[index_1_0.squeeze()].std() / moving[index_1_0.squeeze()].std() + \
+        #             1 - ((fixed_inter_2[index_2_0.squeeze()] - fixed_inter_2[index_2_0.squeeze()].mean()) * (moving[index_2_0.squeeze()] - moving[index_2_0.squeeze()].mean())).mean() / fixed_inter_2[index_2_0.squeeze()].std() / moving[index_2_0.squeeze()].std()
+                    
+        # loss_l2 = torch.mean((fixed_inter_0 - moving)**2 * z_weight_0.unsqueeze(1)) + \
+        #           torch.mean((fixed_inter_1 - moving)**2 * z_weight_1.unsqueeze(1)) + \
+        #           torch.mean((fixed_inter_2 - moving)**2 * z_weight_2.unsqueeze(1))
+                  
+        # tmp_0 = torch.abs(torch.mm(phi_3d_0[:,[0]][neigh_orders].view(n_vertex, 7), grad_filter)) * z_weight_0.unsqueeze(1) + \
+        #         torch.abs(torch.mm(phi_3d_0[:,[1]][neigh_orders].view(n_vertex, 7), grad_filter)) * z_weight_0.unsqueeze(1) + \
+        #         torch.abs(torch.mm(phi_3d_0[:,[2]][neigh_orders].view(n_vertex, 7), grad_filter)) * z_weight_0.unsqueeze(1)
+        # tmp_1 = torch.abs(torch.mm(phi_3d_1[:,[0]][neigh_orders].view(n_vertex, 7), grad_filter)) * z_weight_1.unsqueeze(1) + \
+        #         torch.abs(torch.mm(phi_3d_1[:,[1]][neigh_orders].view(n_vertex, 7), grad_filter)) * z_weight_1.unsqueeze(1) + \
+        #         torch.abs(torch.mm(phi_3d_1[:,[2]][neigh_orders].view(n_vertex, 7), grad_filter)) * z_weight_1.unsqueeze(1)
+        # tmp_2 = torch.abs(torch.mm(phi_3d_2[:,[0]][neigh_orders].view(n_vertex, 7), grad_filter)) * z_weight_2.unsqueeze(1) + \
+        #         torch.abs(torch.mm(phi_3d_2[:,[1]][neigh_orders].view(n_vertex, 7), grad_filter)) * z_weight_2.unsqueeze(1) + \
+        #         torch.abs(torch.mm(phi_3d_2[:,[2]][neigh_orders].view(n_vertex, 7), grad_filter)) * z_weight_2.unsqueeze(1)
+        # loss_smooth = torch.mean(tmp_0) + torch.mean(tmp_1) + torch.mean(tmp_2)
+        
+        # loss_phi_consistency = torch.mean(torch.abs(phi_3d_0_to_1[index_01] - phi_3d_1[index_01])) + \
+        #                        torch.mean(torch.abs(phi_3d_1_to_2[index_12] - phi_3d_2[index_12])) + \
+        #                        torch.mean(torch.abs(phi_3d_0_to_2[index_02] - phi_3d_2[index_02]))
+        
+            
+        loss_corr = 1 - ((fixed_inter - fixed_inter.mean()) * (moving - moving.mean())).mean() / fixed_inter.std() / moving.std()
+               
+        loss_l2 = torch.mean((fixed_inter - moving)**2)
+        
+        loss_smooth = torch.abs(torch.mm(phi_3d_orig[0:n_vertex][:,[0]][neigh_orders].view(n_vertex, 7), grad_filter)) + \
+                      torch.abs(torch.mm(phi_3d_orig[0:n_vertex][:,[1]][neigh_orders].view(n_vertex, 7), grad_filter)) + \
+                      torch.abs(torch.mm(phi_3d_orig[0:n_vertex][:,[2]][neigh_orders].view(n_vertex, 7), grad_filter))
+        loss_smooth = torch.mean(loss_smooth)
+                  
+        loss_phi_consistency = torch.mean(torch.abs(phi_3d_0_to_1[merge_index[7]] - phi_3d_1_orig[merge_index[7]])) + \
+                                torch.mean(torch.abs(phi_3d_1_to_2[merge_index[8]] - phi_3d_2_orig[merge_index[8]])) + \
+                                torch.mean(torch.abs(phi_3d_0_to_2[merge_index[9]] - phi_3d_2_orig[merge_index[9]]))
+            
         # multi-level loss -- 642
 #        loss_l2_642, loss_corr_642, loss_smooth_642, loss_phi_consistency_642 = multi_level_loss(642, fixed_sulc[0:642], moving[0:642], fixed_xyz_0[0:642], phi_3d[0:642], num_composition, neigh_orders_642, merge_index_642, phi_3d_0_to_1, phi_3d_1_orig, phi_3d_1_to_2, phi_3d_2_orig, phi_3d_0_to_2, phi_3d, device)
 #        loss_642 = weight_l2 * loss_l2_642 + weight_corr * loss_corr_642 + weight_smooth * loss_smooth_642 + weight_phi_consis *  loss_phi_consistency_642
 
         # multi-level loss -- 40962
-        loss_l2_40962, loss_corr_40962, loss_smooth_40962, loss_phi_consistency_40962 = multi_level_loss(40962, fixed_sulc[0:40962], moving[0:40962], fixed_xyz_0[0:40962], phi_3d[0:40962], num_composition, neigh_orders, merge_index, phi_3d_0_to_1, phi_3d_1_orig, phi_3d_1_to_2, phi_3d_2_orig, phi_3d_0_to_2, phi_3d, device, bi=True,img0=img0, bi_inter=bi_inter_0)
-        loss_40962 = weight_l2 * loss_l2_40962 + weight_corr * loss_corr_40962 + weight_smooth * loss_smooth_40962 + weight_phi_consis *  loss_phi_consistency_40962
+#        loss_l2_40962, loss_corr_40962, loss_smooth_40962, loss_phi_consistency_40962 = multi_level_loss(40962, fixed_sulc[0:40962], moving[0:40962], fixed_xyz_0[0:40962], phi_3d[0:40962], num_composition, neigh_orders, merge_index, phi_3d_0_to_1, phi_3d_1_orig, phi_3d_1_to_2, phi_3d_2_orig, phi_3d_0_to_2, phi_3d, device, bi=True,img0=img0, bi_inter=bi_inter_0)
+#        loss_40962 = weight_l2 * loss_l2_40962 + weight_corr * loss_corr_40962 + weight_smooth * loss_smooth_40962 + weight_phi_consis *  loss_phi_consistency_40962
 
 
-        loss = loss_40962
+        loss = weight_l2 * loss_l2 + weight_corr * loss_corr + weight_smooth * loss_smooth + weight_phi_consis * loss_phi_consistency 
 
         for optimizer in optimizers:
             optimizer.zero_grad()
@@ -431,15 +420,15 @@ for epoch in range(80):
             optimizer.step()
        
         print("[Epoch {}] [Batch {}/{}] [loss_l2: {:5.4f}] [loss_corr: {:5.4f}] [loss_smooth: {:5.4f}] [loss_phi_consistency: {:5.4f}]".format(epoch, batch_idx, len(train_dataloader),
-                                        loss_l2_40962.item(), loss_corr_40962.item(), loss_smooth_40962.item(), loss_phi_consistency_40962.item()))
-        writer.add_scalars('Train/loss', {'loss_l2': loss_l2_40962.item()*weight_l2,
-                                          'loss_corr': loss_corr_40962.item()*weight_corr, 
-                                          'loss_smooth': loss_smooth_40962.item()*weight_smooth, 
-                                          'loss_phi_consistency': loss_phi_consistency_40962.item()*weight_phi_consis}, 
+                                        loss_l2.item(), loss_corr.item(), loss_smooth.item(), loss_phi_consistency.item()))
+        writer.add_scalars('Train/loss', {'loss_l2': loss_l2.item()*weight_l2,
+                                          'loss_corr': loss_corr.item()*weight_corr, 
+                                          'loss_smooth': loss_smooth.item()*weight_smooth, 
+                                          'loss_phi_consistency': loss_phi_consistency.item()*weight_phi_consis}, 
                                           epoch*len(train_dataloader) + batch_idx)
     
-    torch.save(model_0.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/M3_2_regis_"+regis_feat+"_"+str(n_vertex)+"_3d_smooth15_phiconsis10_corr1_0.mdl")
-    torch.save(model_1.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/M3_2_regis_"+regis_feat+"_"+str(n_vertex)+"_3d_smooth15_phiconsis10_corr1_1.mdl")
-    torch.save(model_2.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/scripts/trained_model/M3_2_regis_"+regis_feat+"_"+str(n_vertex)+"_3d_smooth15_phiconsis10_corr1_2.mdl")
+    torch.save(model_0.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/NAMIC/trained_models/M3_regis_"+regis_feat+"_"+str(n_vertex)+"_diffe_biTrue_smooth45_phiconsis10_corr4_0.mdl")
+    torch.save(model_1.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/NAMIC/trained_models/M3_regis_"+regis_feat+"_"+str(n_vertex)+"_diffe_biTrue_smooth45_phiconsis10_corr4_1.mdl")
+    torch.save(model_2.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/NAMIC/trained_models/M3_regis_"+regis_feat+"_"+str(n_vertex)+"_diffe_biTrue_smooth45_phiconsis10_corr4_2.mdl")
     
     

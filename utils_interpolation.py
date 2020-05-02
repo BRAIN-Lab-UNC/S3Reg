@@ -289,28 +289,10 @@ def bilinearResampleSphereSurf(vertices_inter, feat, bi_inter_40962, radius=1.0)
     img = np.sum(np.multiply((feat[inter_indices.flatten()]).reshape((inter_indices.shape[0], inter_indices.shape[1], feat.shape[1])), np.repeat(inter_weights[:,:, np.newaxis], feat.shape[1], axis=-1)), axis=1)
     img = img.reshape((width, width, feat.shape[1]))
     
-    vertices_inter[:,2] = np.clip(vertices_inter[:,2], -0.999999999, 0.999999999)
-    beta = np.arccos(vertices_inter[:,2]/radius)
-    row = beta/(np.pi/(width-1))
-    
-    tmp = (vertices_inter[:,0] == 0).nonzero()[0]
-    vertices_inter[:,0][tmp] = 1e-15
-    
-    alpha = np.arctan(vertices_inter[:,1]/vertices_inter[:,0])
-    tmp = (vertices_inter[:,0] < 0).nonzero()[0]
-    alpha[tmp] = np.pi + alpha[tmp]
-    
-    alpha = 2*np.pi + alpha
-    alpha = np.remainder(alpha, 2*np.pi)
-    
-    col = alpha/(2*np.pi/(width-1))
-    
-    feat_inter = bilinear_interpolate(img, col, row)
-    
-    return feat_inter
+    return bilinearResampleSphereSurfImg(vertices_inter, img, radius=radius)
 
 
-def bilinearResampleSphereSurf_img(vertices_inter, img, radius=1.0):
+def bilinearResampleSphereSurfImg(vertices_inter, img, radius=1.0):
     """
     ONLY!! assume vertices_fix are on the standard icosahedron discretized spheres!!
     

@@ -124,7 +124,7 @@ def get_orthonormal_vectors(n_ver, rotated=0):
     get the orthonormal vectors
     
     n_vec: int, number of vertices, 42,162,642,2562,10242,...
-    rotated: 0: original, 1: rotate 90 degrees along y axis, 2: then rotate 90 degrees along x axis
+    rotated: 0: original, 1: rotate 90 degrees along y axis, 2: then rotate 90 degrees along z axis
     return orthonormal matrix, shape: n_vec * 3 * 2
     """
     assert type(n_ver) is int, "n_ver, the number of vertices should be int type"
@@ -224,7 +224,7 @@ def check_intersect_vertices_worker(vertices, faces, top_k):
        
         normal = np.cross(orig_vertex_1-orig_vertex_3, orig_vertex_2-orig_vertex_3)    # normals of the face
           
-        # use formula p(x) = <p1,n>/<x,n> * x in spherical demons paper to calculate the intersection with the triangle face
+        # use formula p(x) = <p1,n>/<x,n> * x to calculate the intersection with the triangle face
         ratio = np.sum(orig_vertex_1 * normal)/np.sum(vertices[ind,:] * normal, axis=1)
         P = np.repeat(ratio[:,np.newaxis], 3, axis=1) * vertices[ind,:]  # intersection points
         
