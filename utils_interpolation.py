@@ -115,7 +115,7 @@ def singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=7):
     tmp = area_BCP + area_ACP + area_ABP - area_ABC
     index = np.argmin(tmp)
     
-    if tmp[index] > 1e-10:
+    if tmp[index] > 1e-06:
         if k > 15:
             print("candidate faces don't contain the correct one, top k shoulb be larger, function recursion, current k =", k)
         return singleVertexInterpo_7(vertex, vertices, tree, neigh_orders, k=k+5)
@@ -275,12 +275,12 @@ def bilinear_interpolate(im, x, y):
     return wa[:,np.newaxis]*Ia + wb[:,np.newaxis]*Ib + wc[:,np.newaxis]*Ic + wd[:,np.newaxis]*Id
 
         
-def bilinearResampleSphereSurf(vertices_inter, feat, bi_inter_40962, radius=1.0):
+def bilinearResampleSphereSurf(vertices_inter, feat, bi_inter, radius=1.0):
     """
     ONLY!! assume vertices_fix are on the standard icosahedron discretized spheres!!
     
     """
-    inter_indices, inter_weights = bi_inter_40962
+    inter_indices, inter_weights = bi_inter
     
     width = int(np.sqrt(len(inter_indices)))
     if len(feat.shape) == 1:

@@ -26,16 +26,16 @@ from model import Unet
 
 device = torch.device('cuda:0') # torch.device('cpu'), or torch.device('cuda:0')
 learning_rate = 0.001
-weight_corr = 4.0
-weight_smooth = 45.0
+weight_smooth = 5.0
+weight_phi_consis = 10.0
+weight_corr = 1.0
 weight_l2 = 10.0
 weight_l1 = 0.0
-weight_phi_consis = 10.0
-regis_feat = 'curv' # 'sulc' or 'curv'
 
-norm_method = '2' # '1': use individual max min, '2': use fixed max min
 n_vertex = 40962
-diffe = True
+regis_feat = 'sulc' # 'sulc' or 'curv'
+
+diffe = False
 bi = True
 num_composition = 6
 
@@ -44,23 +44,22 @@ max_disp = get_vertex_dis(n_vertex)/100.0 * 0.2
 
 ###########################################################
 
+norm_method = '2' # '1': use individual max min, '2': use fixed max min
 in_ch = 2   # one for fixed sulc, one for moving sulc
 out_ch = 2  # two components for tangent plane deformation vector 
 batch_size = 1
 data_for_test = 0.2
-initial = 1.
-if n_vertex == 642:
-    initial = 1.0
 
 ###########################################################
 
-#files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/data/preprocessed_npy/*/*.lh.SphereSurf.Orig.sphere.resampled.'+str(n_vertex)+'.npy'))
-#files = [x for x in files if float(x.split('/')[-1].split('_')[1].split('.')[0]) >=450 and float(x.split('/')[-1].split('_')[1].split('.')[0]) <= 630]
-
-# files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/DL_reg/sub*/sub*.lh.SphereSurf.Orig.resampled.'+ str(n_vertex) + '.npy'))
-# files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/results/M3_regis_sulc_642_nondiffe_smooth15_phiconsis4_corr4/training_2562/*.lh.SphereSurf.Orig.resampled.642.DL.moved_3.upto2562.resampled.2562.npy'))
-# files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/results/M3_regis_sulc_2562_nondiffe_biTrue_smooth20_phiconsis5_corr4/training_10242/*.lh.SphereSurf.Orig.resampled.642.DL.moved_3.upto2562.resampled.2562.DL.moved_3.upto10242.resampled.10242.npy'))
-files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/results/M3_regis_sulc_10242_nondiffe_biTrue_smooth20_phiconsis10_corr4/training_40962/*.lh.SphereSurf.Orig.resampled.642.DL.moved_3.upto2562.resampled.2562.DL.moved_3.upto10242.resampled.10242.DL.moved_3.upto40962.resampled.40962.npy'))
+if n_vertex == 642:
+    files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/DL_reg/sub*/sub*.lh.SphereSurf.Orig.resampled.'+ str(n_vertex) + '.npy'))
+elif n_vertex == 2562:
+    files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/results/M3_regis_sulc_642_nondiffe_smooth15_phiconsis4_corr4/training_2562/*.lh.SphereSurf.Orig.resampled.642.DL.moved_3.upto2562.resampled.2562.npy'))
+elif n_vertex == 10242:
+    files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/results/M3_regis_sulc_2562_nondiffe_smooth10_phiconsis2_corr1/training_10242/*.lh.SphereSurf.Orig.resampled.642.DL.moved_3.upto2562.resampled.2562.DL.moved_3.upto10242.resampled.10242.npy'))
+elif n_vertex == 40962:
+    files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/results/M3_regis_sulc_10242_nondiffe_smooth8_phiconsis5_corr1/training_40962/*.lh.SphereSurf.Orig.resampled.642.DL.moved_3.upto2562.resampled.2562.DL.moved_3.upto10242.resampled.10242.DL.moved_3.upto40962.resampled.40962.npy'))
 
 test_files = [ files[x] for x in range(int(len(files)*data_for_test)) ]
 train_files = [ files[x] for x in range(int(len(files)*data_for_test), len(files)) ]
@@ -84,7 +83,7 @@ def get_atlas(n_vertex, regis_feat, norm_method, device):
         if regis_feat == 'sulc':
             fixed_sulc = (fixed_sulc + 11.5)/(13.65+11.5)
         else:
-            fixed_sulc = (fixed_sulc + 2.32)/(2.08+2.32)
+            fixed_sulc = (fixed_sulc + 1.)/(1.+1.)
     else:
         raise NotImplementedError('norm_method should be 1 or 2.')
     
@@ -163,7 +162,7 @@ class BrainSphere(torch.utils.data.Dataset):
             if self.regis_feat == 'sulc':
                 sulc = (sulc + 11.5)/(13.65+11.5)
             else:
-                sulc = (sulc + 2.32)/(2.08+2.32)
+                sulc = (sulc + + 1.)/(1.+1.)
             
         return sulc.astype(np.float32)
 
@@ -291,9 +290,9 @@ for epoch in range(80):
         data = torch.cat((moving, fixed_sulc), 1)
         
         # tangent vector field phi
-        phi_2d_0_orig = model_0(data)/initial
-        phi_2d_1_orig = model_1(data)/initial
-        phi_2d_2_orig = model_2(data)/initial
+        phi_2d_0_orig = model_0(data)
+        phi_2d_1_orig = model_1(data)
+        phi_2d_2_orig = model_2(data)
         
         phi_3d_0_orig = convert2DTo3D(phi_2d_0_orig, En_0, device)
         phi_3d_1_orig = convert2DTo3D(phi_2d_1_orig, En_1, device)
@@ -321,7 +320,7 @@ for epoch in range(80):
             """ diffeomorphism  """
             # divide to small veloctiy field
             phi_3d = phi_3d_orig/math.pow(2,num_composition)
-            print(torch.norm(phi_3d,dim=1).max().item())
+            # print(torch.norm(phi_3d,dim=1).max().item())
             moving_warp_phi_3d = diffeomorp(fixed_xyz_0, phi_3d, num_composition=num_composition, bi=bi, bi_inter=bi_inter_0, neigh_orders=neigh_orders, device=device)
         
         else:
@@ -344,64 +343,27 @@ for epoch in range(80):
             fixed_inter = bilinearResampleSphereSurfImg(moving_warp_phi_3d, img0)
         else:
             fixed_inter = resampleSphereSurf(fixed_xyz_0, moving_warp_phi_3d, fixed_sulc, neigh_orders, device)
+                
         
-        
-        """ after merge """
-        # """ warp moving image """
-        # moving_warp_phi_3d_0 = fixed_xyz_0 + phi_3d_0_orig
-        # moving_warp_phi_3d_0 = moving_warp_phi_3d_0/(torch.norm(moving_warp_phi_3d_0, dim=1, keepdim=True).repeat(1,3)) # normalize the deformed vertices onto the sphere
-        # moving_warp_phi_3d_1 = fixed_xyz_1 + phi_3d_1_orig
-        # moving_warp_phi_3d_1 = moving_warp_phi_3d_1/(torch.norm(moving_warp_phi_3d_1, dim=1, keepdim=True).repeat(1,3)) # normalize the deformed vertices onto the sphere
-        # moving_warp_phi_3d_2 = fixed_xyz_2 + phi_3d_2_orig
-        # moving_warp_phi_3d_2 = moving_warp_phi_3d_2/(torch.norm(moving_warp_phi_3d_2, dim=1, keepdim=True).repeat(1,3)) # normalize the deformed vertices onto the sphere
-        
-        # """ compute interpolation values on fixed surface """
-        # if bi:
-        #     fixed_inter_0 = bilinearResampleSphereSurfImg(moving_warp_phi_3d_0, img0)
-        #     fixed_inter_1 = bilinearResampleSphereSurfImg(moving_warp_phi_3d_1, img1)
-        #     fixed_inter_2 = bilinearResampleSphereSurfImg(moving_warp_phi_3d_2, img2)
-        # else:
-        #     fixed_inter_0 = resampleSphereSurf(fixed_xyz_0, moving_warp_phi_3d_0, fixed_sulc, neigh_orders, device)
-        #     fixed_inter_1 = resampleSphereSurf(fixed_xyz_1, moving_warp_phi_3d_1, fixed_sulc, neigh_orders, device)
-        #     fixed_inter_2 = resampleSphereSurf(fixed_xyz_2, moving_warp_phi_3d_2, fixed_sulc, neigh_orders, device)
-        
-        # loss_corr = 1 - ((fixed_inter_0[index_0_0.squeeze()] - fixed_inter_0[index_0_0.squeeze()].mean()) * (moving[index_0_0.squeeze()] - moving[index_0_0.squeeze()].mean())).mean() / fixed_inter_0[index_0_0.squeeze()].std() / moving[index_0_0.squeeze()].std() + \
-        #             1 - ((fixed_inter_1[index_1_0.squeeze()] - fixed_inter_1[index_1_0.squeeze()].mean()) * (moving[index_1_0.squeeze()] - moving[index_1_0.squeeze()].mean())).mean() / fixed_inter_1[index_1_0.squeeze()].std() / moving[index_1_0.squeeze()].std() + \
-        #             1 - ((fixed_inter_2[index_2_0.squeeze()] - fixed_inter_2[index_2_0.squeeze()].mean()) * (moving[index_2_0.squeeze()] - moving[index_2_0.squeeze()].mean())).mean() / fixed_inter_2[index_2_0.squeeze()].std() / moving[index_2_0.squeeze()].std()
-                    
-        # loss_l2 = torch.mean((fixed_inter_0 - moving)**2 * z_weight_0.unsqueeze(1)) + \
-        #           torch.mean((fixed_inter_1 - moving)**2 * z_weight_1.unsqueeze(1)) + \
-        #           torch.mean((fixed_inter_2 - moving)**2 * z_weight_2.unsqueeze(1))
-                  
-        # tmp_0 = torch.abs(torch.mm(phi_3d_0[:,[0]][neigh_orders].view(n_vertex, 7), grad_filter)) * z_weight_0.unsqueeze(1) + \
-        #         torch.abs(torch.mm(phi_3d_0[:,[1]][neigh_orders].view(n_vertex, 7), grad_filter)) * z_weight_0.unsqueeze(1) + \
-        #         torch.abs(torch.mm(phi_3d_0[:,[2]][neigh_orders].view(n_vertex, 7), grad_filter)) * z_weight_0.unsqueeze(1)
-        # tmp_1 = torch.abs(torch.mm(phi_3d_1[:,[0]][neigh_orders].view(n_vertex, 7), grad_filter)) * z_weight_1.unsqueeze(1) + \
-        #         torch.abs(torch.mm(phi_3d_1[:,[1]][neigh_orders].view(n_vertex, 7), grad_filter)) * z_weight_1.unsqueeze(1) + \
-        #         torch.abs(torch.mm(phi_3d_1[:,[2]][neigh_orders].view(n_vertex, 7), grad_filter)) * z_weight_1.unsqueeze(1)
-        # tmp_2 = torch.abs(torch.mm(phi_3d_2[:,[0]][neigh_orders].view(n_vertex, 7), grad_filter)) * z_weight_2.unsqueeze(1) + \
-        #         torch.abs(torch.mm(phi_3d_2[:,[1]][neigh_orders].view(n_vertex, 7), grad_filter)) * z_weight_2.unsqueeze(1) + \
-        #         torch.abs(torch.mm(phi_3d_2[:,[2]][neigh_orders].view(n_vertex, 7), grad_filter)) * z_weight_2.unsqueeze(1)
-        # loss_smooth = torch.mean(tmp_0) + torch.mean(tmp_1) + torch.mean(tmp_2)
-        
-        # loss_phi_consistency = torch.mean(torch.abs(phi_3d_0_to_1[index_01] - phi_3d_1[index_01])) + \
-        #                        torch.mean(torch.abs(phi_3d_1_to_2[index_12] - phi_3d_2[index_12])) + \
-        #                        torch.mean(torch.abs(phi_3d_0_to_2[index_02] - phi_3d_2[index_02]))
-        
-            
         loss_corr = 1 - ((fixed_inter - fixed_inter.mean()) * (moving - moving.mean())).mean() / fixed_inter.std() / moving.std()
-               
+        loss_phi_consistency = torch.mean(torch.abs(phi_3d_0_to_1[merge_index[7]] - phi_3d_1_orig[merge_index[7]])) + \
+                               torch.mean(torch.abs(phi_3d_1_to_2[merge_index[8]] - phi_3d_2_orig[merge_index[8]])) + \
+                            torch.mean(torch.abs(phi_3d_0_to_2[merge_index[9]] - phi_3d_2_orig[merge_index[9]]))
+        # if epoch < 10:
         loss_l2 = torch.mean((fixed_inter - moving)**2)
-        
         loss_smooth = torch.abs(torch.mm(phi_3d_orig[0:n_vertex][:,[0]][neigh_orders].view(n_vertex, 7), grad_filter)) + \
                       torch.abs(torch.mm(phi_3d_orig[0:n_vertex][:,[1]][neigh_orders].view(n_vertex, 7), grad_filter)) + \
                       torch.abs(torch.mm(phi_3d_orig[0:n_vertex][:,[2]][neigh_orders].view(n_vertex, 7), grad_filter))
         loss_smooth = torch.mean(loss_smooth)
-                  
-        loss_phi_consistency = torch.mean(torch.abs(phi_3d_0_to_1[merge_index[7]] - phi_3d_1_orig[merge_index[7]])) + \
-                                torch.mean(torch.abs(phi_3d_1_to_2[merge_index[8]] - phi_3d_2_orig[merge_index[8]])) + \
-                                torch.mean(torch.abs(phi_3d_0_to_2[merge_index[9]] - phi_3d_2_orig[merge_index[9]]))
-            
+        # else:
+        #     lamda = torch.sigmoid(a[:,[2]])
+        #     loss_l2 = torch.mean((fixed_inter - moving)**2 * (1.- lamda))
+        #     loss_smooth = torch.abs(torch.mm(phi_3d_orig[0:n_vertex][:,[0]][neigh_orders].view(n_vertex, 7), grad_filter)) + \
+        #                   torch.abs(torch.mm(phi_3d_orig[0:n_vertex][:,[1]][neigh_orders].view(n_vertex, 7), grad_filter)) + \
+        #                   torch.abs(torch.mm(phi_3d_orig[0:n_vertex][:,[2]][neigh_orders].view(n_vertex, 7), grad_filter))
+        #     loss_smooth = torch.mean(loss_smooth * lamda)
+
+        loss = weight_l2 * loss_l2 + weight_corr * loss_corr + weight_smooth * loss_smooth + weight_phi_consis * loss_phi_consistency 
         # multi-level loss -- 642
 #        loss_l2_642, loss_corr_642, loss_smooth_642, loss_phi_consistency_642 = multi_level_loss(642, fixed_sulc[0:642], moving[0:642], fixed_xyz_0[0:642], phi_3d[0:642], num_composition, neigh_orders_642, merge_index_642, phi_3d_0_to_1, phi_3d_1_orig, phi_3d_1_to_2, phi_3d_2_orig, phi_3d_0_to_2, phi_3d, device)
 #        loss_642 = weight_l2 * loss_l2_642 + weight_corr * loss_corr_642 + weight_smooth * loss_smooth_642 + weight_phi_consis *  loss_phi_consistency_642
@@ -410,9 +372,7 @@ for epoch in range(80):
 #        loss_l2_40962, loss_corr_40962, loss_smooth_40962, loss_phi_consistency_40962 = multi_level_loss(40962, fixed_sulc[0:40962], moving[0:40962], fixed_xyz_0[0:40962], phi_3d[0:40962], num_composition, neigh_orders, merge_index, phi_3d_0_to_1, phi_3d_1_orig, phi_3d_1_to_2, phi_3d_2_orig, phi_3d_0_to_2, phi_3d, device, bi=True,img0=img0, bi_inter=bi_inter_0)
 #        loss_40962 = weight_l2 * loss_l2_40962 + weight_corr * loss_corr_40962 + weight_smooth * loss_smooth_40962 + weight_phi_consis *  loss_phi_consistency_40962
 
-
-        loss = weight_l2 * loss_l2 + weight_corr * loss_corr + weight_smooth * loss_smooth + weight_phi_consis * loss_phi_consistency 
-
+        
         for optimizer in optimizers:
             optimizer.zero_grad()
         loss.backward()
@@ -427,8 +387,8 @@ for epoch in range(80):
                                           'loss_phi_consistency': loss_phi_consistency.item()*weight_phi_consis}, 
                                           epoch*len(train_dataloader) + batch_idx)
     
-    torch.save(model_0.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/NAMIC/trained_models/M3_regis_"+regis_feat+"_"+str(n_vertex)+"_diffe_biTrue_smooth45_phiconsis10_corr4_0.mdl")
-    torch.save(model_1.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/NAMIC/trained_models/M3_regis_"+regis_feat+"_"+str(n_vertex)+"_diffe_biTrue_smooth45_phiconsis10_corr4_1.mdl")
-    torch.save(model_2.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/NAMIC/trained_models/M3_regis_"+regis_feat+"_"+str(n_vertex)+"_diffe_biTrue_smooth45_phiconsis10_corr4_2.mdl")
+    torch.save(model_0.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/NAMIC/trained_models/M3_regis_"+regis_feat+"_"+str(n_vertex)+"_nondiffe_smooth5_phiconsis10_corr1_0.mdl")
+    torch.save(model_1.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/NAMIC/trained_models/M3_regis_"+regis_feat+"_"+str(n_vertex)+"_nondiffe_smooth5_phiconsis10_corr1_1.mdl")
+    torch.save(model_2.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/NAMIC/trained_models/M3_regis_"+regis_feat+"_"+str(n_vertex)+"_nondiffe_smooth5_phiconsis10_corr1_2.mdl")
     
     

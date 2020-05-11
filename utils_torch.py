@@ -264,8 +264,8 @@ def bilinear_interpolate(im, x, y):
     """
     im: 512*512*C
     """
-    x = torch.clamp(x, 0.0001, im.shape[1]-1.0001)
-    y = torch.clamp(y, 0.0001, im.shape[1]-1.0001)
+    x = torch.clamp(x, 0.0000001, im.shape[1]-1.00000001)
+    y = torch.clamp(y, 0.0000001, im.shape[1]-1.00000001)
     
     x0 = torch.floor(x)
     x1 = x0 + 1

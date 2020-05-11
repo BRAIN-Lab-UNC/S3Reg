@@ -762,20 +762,12 @@ def maunal_label(in_dic, field, ind, label):
     
     return in_dic
 
-files = ['/media/fenqiang/DATA/unc/Data/registration/data/MSM/MNBCP266437_574/surf/Curv.L.sphere.reg.sucu.vtk',
-        '/media/fenqiang/DATA/unc/Data/registration/data/preprocessed_npy/MNBCP266437_574/MNBCP266437_574.lh.SphereSurf.Orig.sphere.resampled.163842.moved.vtk',
-        '/media/fenqiang/DATA/unc/Data/registration/data/preprocessed_npy/MNBCP266437_574/MNBCP266437_574.lh.SphereSurf.Orig.sphere.resampled.163842.vtk',
-        '/media/fenqiang/DATA/unc/Data/registration/data/SD_registration/MNBCP266437_574/surf/lh.NewResampledAlignedToBCPAtlas.sphere.vtk']
+files = ['/media/fenqiang/DATA/unc/Data/registration/NAMIC/atlas_FS/lh.sphere.163842.rotated_0.norm.vtk']
 
 
 for file in files:
     a = read_vtk(file)
-    a = maunal_label(a, 'par_vec', [10301,
-72513,
-93990,
-129464,
-150229
-], [20,180,140])
+    a = maunal_label(a, 'par_vec', [18341,35296,106742,146897,146899], [220,60,220])
     write_vtk(a, file)
 
 

@@ -168,7 +168,7 @@ for n_vertex in ns_vertex:
 
 
 #####################################################################
-""" Better visualize atlas to normalize atlas """ 
+"""  Normalize atlas to better visualize atlas """ 
 
 ns_vertex = [42, 162, 642, 2562, 10242, 40962, 163842]
 for n_vertex in ns_vertex:
@@ -199,7 +199,8 @@ for n_vertex in ns_vertex:
 #####################################################################
 """ convert vtk to npy """ 
 
-files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/results/M3_regis_sulc_10242_nondiffe_biTrue_smooth20_phiconsis10_corr4/training_40962/*.lh.SphereSurf.Orig.resampled.642.DL.moved_3.upto2562.resampled.2562.DL.moved_3.upto10242.resampled.10242.DL.moved_3.upto40962.resampled.40962.vtk'))
+files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/results/M3_regis_sulc_2562_nondiffe_smooth10_phiconsis2_corr1/training_10242/*.lh.SphereSurf.Orig.resampled.642.DL.moved_3.upto2562.resampled.2562.DL.moved_3.upto10242.resampled.10242.vtk'))
+files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/results/M3_regis_sulc_10242_nondiffe_smooth8_phiconsis5_corr1/training_40962/*.lh.SphereSurf.Orig.resampled.642.DL.moved_3.upto2562.resampled.2562.DL.moved_3.upto10242.resampled.10242.DL.moved_3.upto40962.resampled.40962.vtk'))
 
 for file in files:
     data = read_vtk(file)
@@ -211,4 +212,94 @@ for file in files:
     
     
 #####################################################################
-""" convert SD registered to vtk """ 
+""" add label from NAMIC dataset """ 
+files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/DL_reg/sub*/sub*.lh.SphereSurf.Orig.resampled.163842.vtk'))
+
+for file in files:
+    data = read_vtk(file)
+    par_vec = read_vtk('/media/fenqiang/Seagate/NAMIC/RigidAlignAndResampledData/SphericalMappingWithNewCurvSulc/resampledVTK/'+ file.split('/')[9] +'_lh.SphereSurf.Resampled160K.vtk')
+    par_vec = par_vec['par_vec']
+    data['par_vec'] = par_vec
+    write_vtk(data, file)
+    
+   
+#####################################################################
+""" resample infaltedH for SD resgistration """ 
+files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/SD_reg/sub*/surf/lh.inflated.H.mat'))
+tem = read_vtk('/media/fenqiang/DATA/unc/Data/Template/sphere_163842.vtk');
+
+for file in files:
+    data = sio.loadmat(file)
+    inflatedH = data['inflatedH']
+    surf = read_vtk(file.replace('lh.inflated.H.mat', 'lh.sphere.vtk'))
+    assert len(surf['vertices']) == len(inflatedH)
+    resampled = resampleSphereSurf(surf['vertices'], tem['vertices'], inflatedH)
+    
+   
+#####################################################################
+""" Convert MSM registered results  """
+files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/MSM_reg/sub*/surf/Curv.L.sphere.reg.vtk'))
+
+for file in files:
+    surf = read_vtk(file)
+    curv = np.loadtxt(file.replace('Curv.L.sphere.reg.vtk', 'lh.curv.resampled.txt'))
+    sulc = np.loadtxt(file.replace('Curv.L.sphere.reg.vtk', 'lh.sulc.resampled.txt'))
+    lbl = read_vtk('/media/fenqiang/DATA/unc/Data/registration/NAMIC/DL_reg/'+ file.split('/')[9] +'/' + file.split('/')[9] +'.lh.SphereSurf.Orig.resampled.163842.vtk')
+    lbl = lbl['par_vec']
+    surf['curv'] = curv
+    surf['sulc'] = sulc
+    surf['par_vec'] = lbl
+    write_vtk(surf, file.replace('Curv.L.sphere.reg.vtk', 'Curv.L.sphere.reg.sucu.vtk'))
+    
+""" resample MSM registered results  """
+files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/MSM_reg/sub*/surf/Curv.L.sphere.reg.sucu.vtk'))
+template_163842 = read_vtk('/media/fenqiang/DATA/unc/Data/Template/sphere_163842.vtk')
+
+for file in files:
+    surf = read_vtk(file)
+    sucu = np.hstack((surf['sulc'][:,np.newaxis], surf['curv'][:,np.newaxis]))
+    resample_feat = resampleSphereSurf(surf['vertices'], template_163842['vertices'], sucu)
+    resample_lbl = resample_label(surf['vertices'], template_163842['vertices'], surf['par_vec'])
+    
+    sphere_surf_163842 = {'vertices': template_163842['vertices'],
+                          'faces': template_163842['faces'],
+                          'curv': resample_feat[:,1],
+                          'sulc': resample_feat[:,0],
+                          'par_vec': resample_lbl}
+    write_vtk(sphere_surf_163842, file.replace('Curv.L.sphere.reg.sucu.vtk', 'Curv.L.sphere.reg.sucu.resampled.163842.vtk'))
+
+
+
+   
+#####################################################################
+""" Copy lbl to SD registered surfacea and resample  """
+
+files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/SD_reg/sub*/surf/lh.sphere.resampled.AlignToFSAtlas.sphere.sucu.vtk'))
+
+for file in files:
+    surf = read_vtk(file)
+    sub = file.split('/')[9]
+    
+    lbl = read_vtk('/media/fenqiang/DATA/unc/Data/registration/NAMIC/DL_reg/'+ sub +'/'+ sub +'.lh.SphereSurf.Orig.resampled.163842.vtk')
+    surf['par_vec'] = lbl['par_vec']
+    write_vtk(surf, file)
+
+    
+""" resample SD registered results  """
+files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/SD_reg/sub*/surf/lh.sphere.resampled.AlignToFSAtlas.sphere.sucu.vtk'))
+
+template_163842 = read_vtk('/media/fenqiang/DATA/unc/Data/Template/sphere_163842.vtk')
+for file in files:
+    print(file)
+    surf = read_vtk(file)
+        
+    resample_sulc_curv = resampleSphereSurf(surf['vertices'], template_163842['vertices'], np.hstack((surf['sulc'][:,np.newaxis], surf['curv'][:,np.newaxis])))
+    resample_surf = {'vertices': template_163842['vertices'],
+                      'faces': template_163842['faces'],
+                      'sulc': resample_sulc_curv[:,0],
+                      'curv': resample_sulc_curv[:,1]}
+    if 'par_vec' in surf.keys():
+        resample_lbl = resample_label(surf['vertices'], template_163842['vertices'], surf['par_vec'])
+        resample_surf['par_vec'] = resample_lbl
+    write_vtk(resample_surf, file.replace('.vtk', '.resampled.163842.vtk'))
+    

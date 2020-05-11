@@ -26,13 +26,13 @@ from model import Unet
 """ hyper-parameters """
 
 device = torch.device('cuda:1') # torch.device('cpu'), or torch.device('cuda:0')
-regis_feat = 'curv' # 'sulc' or 'curv'
+regis_feat = 'sulc' # 'sulc' or 'curv'
 n_vertex = 40962
 
 norm_method = '2' # '1': use individual max min, '2': use fixed max min
-model_name = "M3_regis_"+regis_feat+"_"+str(n_vertex)+"_diffe_biTrue_smooth45_phiconsis10_corr4"
+model_name = "M3_regis_"+regis_feat+"_"+str(n_vertex)+"_nondiffe_smooth5_phiconsis10_corr1"
 
-diffe = True
+diffe = False
 bi = True
 num_composition = 6
 num_composition_deform = 6
@@ -49,19 +49,16 @@ in_ch = 2   # one for sulc in fixed, one for sulc in moving
 out_ch = 2  # two components for tangent plane deformation vector 
 batch_size = 1
 data_for_test = 0.3
-initial = 1.0
-if n_vertex == 642:
-    initial = 1.0
-    
+
 ###########################################################
-
-#files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/data/preprocessed_npy/*/*.lh.SphereSurf.Orig.sphere.resampled.'+str(n_vertex)+'.npy'))
-#files = [x for x in files if float(x.split('/')[-1].split('_')[1].split('.')[0]) >=450 and float(x.split('/')[-1].split('_')[1].split('.')[0]) <= 630]
-
-# files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/DL_reg/sub*/sub*.lh.SphereSurf.Orig.resampled.'+ str(n_vertex) + '.npy'))
-# files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/results/M3_regis_sulc_642_nondiffe_smooth15_phiconsis4_corr4/training_2562/*.lh.SphereSurf.Orig.resampled.642.DL.moved_3.upto2562.resampled.2562.npy'))
-# files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/results/M3_regis_sulc_2562_nondiffe_biTrue_smooth20_phiconsis5_corr4/training_10242/*.lh.SphereSurf.Orig.resampled.642.DL.moved_3.upto2562.resampled.2562.DL.moved_3.upto10242.resampled.10242.npy'))
-files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/results/M3_regis_sulc_10242_nondiffe_biTrue_smooth20_phiconsis10_corr4/training_40962/*.lh.SphereSurf.Orig.resampled.642.DL.moved_3.upto2562.resampled.2562.DL.moved_3.upto10242.resampled.10242.DL.moved_3.upto40962.resampled.40962.npy'))
+if n_vertex == 642:
+    files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/DL_reg/sub*/sub*.lh.SphereSurf.Orig.resampled.'+ str(n_vertex) + '.npy'))
+elif n_vertex == 2562:
+    files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/results/M3_regis_sulc_642_nondiffe_smooth15_phiconsis4_corr4/training_2562/*.lh.SphereSurf.Orig.resampled.642.DL.moved_3.upto2562.resampled.2562.npy'))
+elif n_vertex == 10242:
+    files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/results/M3_regis_sulc_2562_nondiffe_smooth10_phiconsis2_corr1/training_10242/*.lh.SphereSurf.Orig.resampled.642.DL.moved_3.upto2562.resampled.2562.DL.moved_3.upto10242.resampled.10242.npy'))
+elif n_vertex == 40962:
+    files = sorted(glob.glob('/media/fenqiang/DATA/unc/Data/registration/NAMIC/results/M3_regis_sulc_10242_diffe_biTrue_smooth5_phiconsis5_corr1/training_40962/*.lh.SphereSurf.Orig.resampled.642.DL.moved_3.upto2562.resampled.2562.DL.moved_3.upto10242.resampled.10242.DL.moved_3.upto40962.resampled.40962.npy'))
 
 test_files = [ files[x] for x in range(int(len(files)*data_for_test)) ]
 train_files = [ files[x] for x in range(int(len(files)*data_for_test), len(files)) ]
@@ -88,7 +85,7 @@ def get_atlas(n_vertex, regis_feat, norm_method, device):
         if regis_feat == 'sulc':
             fixed_sulc = (fixed_sulc + 11.5)/(13.65+11.5)
         else:
-            fixed_sulc = (fixed_sulc + 2.32)/(2.08+2.32)
+            fixed_sulc = (fixed_sulc + 1.)/(1.+1.)
     else:
         raise NotImplementedError('norm_method should be 1 or 2.')
     
@@ -163,7 +160,7 @@ class BrainSphere(torch.utils.data.Dataset):
             if self.regis_feat == 'sulc':
                 sulc = (sulc + 11.5)/(13.65+11.5)
             else:
-                sulc = (sulc + 2.32)/(2.08+2.32)
+                sulc = (sulc + + 1.)/(1.+1.)
         
         return sulc.astype(np.float32), file, ma, mi
 
@@ -230,9 +227,9 @@ def test(dataloader):
             data = torch.cat((moving, fixed_sulc), 1)
             
             # tangent vector field phi
-            phi_2d_0_orig = model_0(data)/initial
-            phi_2d_1_orig = model_1(data)/initial
-            phi_2d_2_orig = model_2(data)/initial
+            phi_2d_0_orig = model_0(data)
+            phi_2d_1_orig = model_1(data)
+            phi_2d_2_orig = model_2(data)
             
             phi_3d_0_orig = convert2DTo3D(phi_2d_0_orig, En_0, device)
             phi_3d_1_orig = convert2DTo3D(phi_2d_1_orig, En_1, device)
@@ -295,7 +292,7 @@ def test(dataloader):
                 if regis_feat == 'sulc':
                     tmp = moving.detach().cpu().numpy() * (13.65+11.5) - 11.5
                 else:
-                    tmp = moving.detach().cpu().numpy() * (2.08+2.32) - 2.32
+                    tmp = moving.detach().cpu().numpy() * (1.+1.) - 1
                     
             moved = {'vertices': moving_warp_phi_3d.detach().cpu().numpy()*100.0,
                      'faces': fixed_0['faces'],
