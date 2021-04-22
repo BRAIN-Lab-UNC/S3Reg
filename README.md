@@ -12,7 +12,7 @@ pip install sphericalunet
 ```
 
 ### Example code
-It currently not that straightforward to use. You need to modify the `inference.py` to match your own spherical surface and atlas file. Then simply run:
+It currently is not that straightforward to use (busy with the phd thesis stuff...). You need to modify the `inference.py` to match your own spherical surface and atlas file. Then simply run:
 ```
 python inference.py
 ```
