@@ -3,7 +3,9 @@
 """
 Created on Mon Apr 27 03:44:09 2020
 
-@author: fenqiang
+@author: Fenqiang Zhao, https://github.com/zhaofenqiang
+
+Contact: zhaofenqiang0221@gmail.com
 """
 
 import torch
