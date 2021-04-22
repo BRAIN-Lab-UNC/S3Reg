@@ -1,0 +1,14 @@
+levels 5,6,7
+features sulc,sulc,curv
+learning_rate 0.001
+weight_smooth 0.8,3.2,3.9
+weight_l2 1.0,1.0,1.0
+weight_phi_consis 1.0,1.5,3.0
+weight_corr 0.5,0.5,0.2
+diffe True
+bi True
+weight_level 1.0,1.0,1.0
+num_composition 6
+centra False
+weight_centra 0,0,0
+truncated True,True,True
