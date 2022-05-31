@@ -6,7 +6,7 @@
 
 1. Clone or download this repository.
 
-2. This project depends on a lot of utilities in [Spherical U-Net package](https://github.com/zhaofenqiang/SphericalUNetPackage). So you need to install [Spherical U-Net package](https://pypi.org/project/spherical/) from PyPI:
+2. This project depends on a lot of utilities in [Spherical U-Net package](https://github.com/zhaofenqiang/SphericalUNetPackage). So you need to install [Spherical U-Net package](https://pypi.org/project/sphericalunet/) from PyPI:
 ```
 pip install sphericalunet
 ```
