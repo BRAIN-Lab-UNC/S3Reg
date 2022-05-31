@@ -30,8 +30,6 @@ from sphericalunet.model import Unet
 
 device =torch.device('cpu') # torch.device('cpu'), or torch.device('cuda:0')
 
-# CUDA_LAUNCH_BLOCKING=1
-
 ###########################################################
 """ pre-defined registration parameters """
 

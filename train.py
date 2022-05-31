@@ -340,6 +340,6 @@ for epoch in range(80):
     
     torch.save(model_0.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/NAMIC/trained_models/regis_"+regis_feat+"_"+str(n_vertex)+"_0.mdl")
     torch.save(model_1.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/NAMIC/trained_models/regis_"+regis_feat+"_"+str(n_vertex)+"_1.mdl")
-    torch.save(model_2.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/NAMIC/trained_models/regis_"+regis_feat+"_"+str(n_vertex)+"_2.mdl")
+    torch.save(model_2.state_dict(), "/media/fenqiang/DATA/unc/Data/registration/NAMIC/trained_models/regis_"+regis_feat+"_"+str(n_vertex)+"_2.mdl") 
     
     

@@ -6,13 +6,13 @@
 
 1. Clone or download this repository.
 
-2. Install [Spherical U-Net package](https://github.com/zhaofenqiang/SphericalUNetPackage) from PyPI:
+2. This project depends on a lot of utilities in [Spherical U-Net package](https://github.com/zhaofenqiang/SphericalUNetPackage). So you need to install [Spherical U-Net package](https://pypi.org/project/spherical/) from PyPI:
 ```
 pip install sphericalunet
 ```
 
 ### Example code
-It currently is not that straightforward to use (busy with the phd thesis stuff...). You need to modify the `inference.py` to match your own spherical surface and atlas file. Then simply run:
+It currently is not that straightforward to use. You need to modify the `inference.py` to match your own spherical surface and atlas file. Then simply run:
 ```
 python inference.py
 ```

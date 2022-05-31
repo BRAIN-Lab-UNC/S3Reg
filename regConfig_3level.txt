@@ -10,5 +10,5 @@ bi True
 weight_level 1.0,1.0,1.0
 num_composition 6
 centra False
-weight_centra 0,0,0
 truncated True,True,True
+weight_centra 0,0,0
