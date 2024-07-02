@@ -30,7 +30,7 @@ if __name__ == "__main__":
                         help="Specify the hemisphere for registration, lh or rh.")
     parser.add_argument('--config', '-c', default=None,  required=True,
                         help="Specify the config file for registration. " + \
-                            "An example config file can be found at https://github.com/BRAIN-Lab-UNC/S3Reg/blob/master/regConfig_3level.txt")
+                            "An example config file can be found at https://github.com/BRAIN-Lab-UNC/S3Reg/blob/master/config/regConfig_3level_sucu.yaml")
     parser.add_argument('--moving', '-i',  required=True, 
                         help='Path to input vtk surface(s). This could be a list of '+\
                             'multiple files that can be interpreted by glob, e.g., /media/data/sub-*/sub-*.lh.sphere.Resp163842.vtk'+\
