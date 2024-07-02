@@ -15,4 +15,9 @@ and follow the instructions for deformable spherical surface registration
 ```
 python s3reg_rigid_align.py
 ```
-for rigid spherical surface alignment
+for rigid spherical surface alignment.
+
+
+If you use this code, please cite:
+
+Fenqiang Zhao, et.al. S3Reg: Superfast Spherical Surface Registration Based on Deep Learning. IEEE Transactions on Medical Imaging, 2021.
