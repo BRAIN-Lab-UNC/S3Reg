@@ -40,7 +40,7 @@ if __name__ == "__main__":
     parser.add_argument('--age', '-age', default=None, help='Age in month used to find the UNC atlas if you do not have an atlas.'+\
                         ' If you have age in days or years, please convert it to months.'+\
                             ' It will choose the closest model and atlas based '+\
-                                'on the input age otherwise the 24 months atlas and model will be chosen.')
+                                'on the input age otherwise the 72 months atlas and model will be chosen.')
     parser.add_argument('--moved', '-o',  default='[input].AlignToUNCAtlas.vtk',
                         help='Path to ouput surface(s).')
     parser.add_argument('--device', default='GPU', choices=['GPU', 'CPU'], 

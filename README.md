@@ -9,11 +9,11 @@
 ### How to use it
 simply run
 ```
-python s3reg.py
+python s3reg.py -h
 ```
 and follow the instructions for deformable spherical surface registration
 ```
-python s3reg_rigid_align.py
+python s3reg_rigid_align.py -h
 ```
 for rigid spherical surface alignment.
 
