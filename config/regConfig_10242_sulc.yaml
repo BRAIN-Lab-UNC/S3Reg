@@ -1,0 +1,21 @@
+---
+levels: 
+  - 6           # 5: 2562 vertices, 6: 10242 vertices, 7: 40962 vertices, starting level should >= 5
+features:
+  - sulc        # sulc (1-d single feature, e.g., 10242x1) or curv (1-d single feature) or sucu (means the concatenation of sulc and curv, 2-d, e.g., 10242x2)
+hemi: lh        # lh:left hemisphere, rh: right hemisphere
+diffe: True
+bi: True
+learning_rate: 0.001
+weight_smooth:
+  - 5.0
+weight_l2:
+  - 0.5
+weight_phi_consis:
+  - 1.0
+weight_corr:
+  - 1.0
+num_composition: 6
+centra: False
+weight_centra:
+  - 0
